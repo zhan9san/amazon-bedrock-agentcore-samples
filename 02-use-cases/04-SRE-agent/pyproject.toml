@@ -29,10 +29,10 @@ dependencies = [
     "python-dotenv>=1.0.0",
     "anthropic>=0.57.1",
     "python-multipart>=0.0.6",
-    "boto3",
-    "botocore",
-    "awscli",
-    "agentcore"
+    "boto3==1.39.7",
+    "botocore==1.39.7",
+    "awscli==1.41.7",
+    "bedrock-agentcore==0.1.0"
 ]
 
 [project.optional-dependencies]

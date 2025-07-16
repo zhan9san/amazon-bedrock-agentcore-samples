@@ -58,7 +58,7 @@ def _create_acps_client(region: str, endpoint_url: str) -> Any:
     )
 
     return boto3.client(
-        service_name="agentcredentialprovider",
+        service_name="bedrock-agentcore-control",
         config=sdk_config,
         endpoint_url=endpoint_url,
     )

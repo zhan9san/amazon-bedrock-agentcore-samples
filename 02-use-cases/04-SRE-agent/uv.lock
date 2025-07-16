@@ -3,18 +3,6 @@ revision = 1
 requires-python = ">=3.12"
 
 [[package]]
-name = "agentcore"
-version = "0.1.6"
-source = { registry = "https://pypi.org/simple" }
-dependencies = [
-    { name = "pydantic" },
-]
-sdist = { url = "https://files.pythonhosted.org/packages/a6/07/e8f4d324cf5bd279028595c3a962f3526f18d783f3895b230c9dfb862e5b/agentcore-0.1.6.tar.gz", hash = "sha256:558f66c66c3817cfdfca57ee245e38ddb3204667dc0b2593d538b2d3b07c4254", size = 1669 }
-wheels = [
-    { url = "https://files.pythonhosted.org/packages/67/3f/1cbac802fef781bc59143e7a6ba3f2ae557bd7e75e0550d3afae6aec61e5/agentcore-0.1.6-py3-none-any.whl", hash = "sha256:9aacbd88aaf4868b881c0a14b7d45edeb075117d0f3667071dd3cf0ccf58c0c6", size = 2181 },
-]
-
-[[package]]
 name = "annotated-types"
 version = "0.7.0"
 source = { registry = "https://pypi.org/simple" }
@@ -66,7 +54,7 @@ wheels = [
 
 [[package]]
 name = "awscli"
-version = "1.41.3"
+version = "1.41.7"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "botocore" },
@@ -76,9 +64,9 @@ dependencies = [
     { name = "rsa" },
     { name = "s3transfer" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/95/ca/c51f088c5f1480e5a390a2383bcd41226c343bdbbb6068aace89035097b8/awscli-1.41.3.tar.gz", hash = "sha256:16242adf9f6688012ddbd5ecb3641712cec5d552dfe6576767eeeacd71d5efaa", size = 1904644 }
+sdist = { url = "https://files.pythonhosted.org/packages/37/5f/8f1cdf8509eb5471f4aff616a746c538678a6be3e8b5cc39b601ee467129/awscli-1.41.7.tar.gz", hash = "sha256:da405911f402b70a4f0ae049b71a50f0dd1f63c0bd11b17cf368aaafbd09e330", size = 1904648 }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/c9/2d/54ed3737d5c304a50b9b87d5f5bec00832e6e1f310d1c3a9e5dac0199fe4/awscli-1.41.3-py3-none-any.whl", hash = "sha256:8c46d5813ba07283121d4df3659fe712ceff76897d3257be2b394bb58ea45dda", size = 4701430 },
+    { url = "https://files.pythonhosted.org/packages/b9/17/f4503fb52b074458f528e0755bfe37776c437008570e7fea8ac9937afc1e/awscli-1.41.7-py3-none-any.whl", hash = "sha256:5dde10c9b4eb91ebc4f19393db6f25a4ce6dbf5adf52c1cf39db709c64c0c9b6", size = 4701453 },
 ]
 
 [[package]]
@@ -94,6 +82,24 @@ dependencies = [
 sdist = { url = "https://files.pythonhosted.org/packages/fb/b5/7eb834e213d6f73aace21938e5e90425c92e5f42abafaf8a6d5d21beed51/bandit-1.8.6.tar.gz", hash = "sha256:dbfe9c25fc6961c2078593de55fd19f2559f9e45b99f1272341f5b95dea4e56b", size = 4240271 }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/48/ca/ba5f909b40ea12ec542d5d7bdd13ee31c4d65f3beed20211ef81c18fa1f3/bandit-1.8.6-py3-none-any.whl", hash = "sha256:3348e934d736fcdb68b6aa4030487097e23a501adf3e7827b63658df464dddd0", size = 133808 },
+]
+
+[[package]]
+name = "bedrock-agentcore"
+version = "0.1.0"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "boto3" },
+    { name = "botocore" },
+    { name = "pydantic" },
+    { name = "starlette" },
+    { name = "typing-extensions" },
+    { name = "urllib3" },
+    { name = "uvicorn" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/07/67/f07523e943d2e68be3dc2f256b0adb1027da521ad31d5a2caba6f158bd2b/bedrock_agentcore-0.1.0.tar.gz", hash = "sha256:05eea20588e8794cb51b1c76c064fa70d01d0a4bfb404b50e680ddccf10c85d0", size = 269981 }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/22/ce/30a61ad1e18b5ee7aeaa997cfcd6cb5cbe449cb90d3669e40d458c94b007/bedrock_agentcore-0.1.0-py3-none-any.whl", hash = "sha256:2356661f0ce5012871ac0f22ad3741654e2accb1acdf21b7f78ff19ef278643a", size = 48710 },
 ]
 
 [[package]]
@@ -122,30 +128,30 @@ wheels = [
 
 [[package]]
 name = "boto3"
-version = "1.39.3"
+version = "1.39.7"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "botocore" },
     { name = "jmespath" },
     { name = "s3transfer" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/02/42/712a74bb86d06538c55067a35b8a82c57aa303eba95b2b1ee91c829288f4/boto3-1.39.3.tar.gz", hash = "sha256:0a367106497649ae3d8a7b571b8c3be01b7b935a0fe303d4cc2574ed03aecbb4", size = 111838 }
+sdist = { url = "https://files.pythonhosted.org/packages/9c/43/81ae62386917fa163f1d3bc59e77da56924f9824b5100fd2807e74a675fc/boto3-1.39.7.tar.gz", hash = "sha256:28daeb005e3381808e0e12995056ee8951056ddd43506c07482a15b40ae785b0", size = 111820 }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/15/70/723d2ab259aeaed6c96e5c1857ebe7d474ed9aa8f487dea352c60f33798f/boto3-1.39.3-py3-none-any.whl", hash = "sha256:056cfa2440fe1a157a7c2be897c749c83e1a322144aa4dad889f2fca66571019", size = 139906 },
+    { url = "https://files.pythonhosted.org/packages/cc/60/1d2d708f5bc125fe6fe262ea767c82020ea6deeda113e989cff5ab89a9f9/boto3-1.39.7-py3-none-any.whl", hash = "sha256:c8c0e11fff7bb85f903b860b6bfd4f509a4d749decf38bb6a409ffe5d6eb0c91", size = 139882 },
 ]
 
 [[package]]
 name = "botocore"
-version = "1.39.3"
+version = "1.39.7"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "jmespath" },
     { name = "python-dateutil" },
     { name = "urllib3" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/60/66/96e89cc261d75f0b8125436272c335c74d2a39df84504a0c3956adcd1301/botocore-1.39.3.tar.gz", hash = "sha256:da8f477e119f9f8a3aaa8b3c99d9c6856ed0a243680aa3a3fbbfc15a8d4093fb", size = 14132316 }
+sdist = { url = "https://files.pythonhosted.org/packages/e7/9d/73f300c841a3c47d2baf4bf6ecb9d6de476edf91de8c3c26ceed5044e666/botocore-1.39.7.tar.gz", hash = "sha256:431e342ef97ecb387cea9df1ae8c4e0edc1b0c9c50d2e121cca77699f24f8dc1", size = 14201331 }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/53/e4/3698dbb037a44d82a501577c6e3824c19f4289f4afbcadb06793866250d8/botocore-1.39.3-py3-none-any.whl", hash = "sha256:66a81cfac18ad5e9f47696c73fdf44cdbd8f8ca51ab3fca1effca0aabf61f02f", size = 13791724 },
+    { url = "https://files.pythonhosted.org/packages/30/20/ab70de7441cbc4b8ffc5d6d9a8e02e4c703cc07accb7441ce54020e20950/botocore-1.39.7-py3-none-any.whl", hash = "sha256:1d11ba9f3cb46856bb541ed010db160093201a224d21ef854249513ae3af7e77", size = 13864168 },
 ]
 
 [[package]]
@@ -1319,9 +1325,9 @@ name = "sre-agent"
 version = "1.0.0"
 source = { editable = "." }
 dependencies = [
-    { name = "agentcore" },
     { name = "anthropic" },
     { name = "awscli" },
+    { name = "bedrock-agentcore" },
     { name = "boto3" },
     { name = "botocore" },
     { name = "click" },
@@ -1356,13 +1362,13 @@ dev = [
 
 [package.metadata]
 requires-dist = [
-    { name = "agentcore" },
     { name = "anthropic", specifier = ">=0.57.1" },
-    { name = "awscli" },
+    { name = "awscli", specifier = "==1.41.7" },
     { name = "bandit", marker = "extra == 'dev'", specifier = ">=1.7.0" },
+    { name = "bedrock-agentcore", specifier = "==0.1.0" },
     { name = "black", marker = "extra == 'dev'", specifier = ">=23.0.0" },
-    { name = "boto3" },
-    { name = "botocore" },
+    { name = "boto3", specifier = "==1.39.7" },
+    { name = "botocore", specifier = "==1.39.7" },
     { name = "click", specifier = ">=8.1.0" },
     { name = "fastapi", specifier = ">=0.104.0" },
     { name = "flake8", marker = "extra == 'dev'", specifier = ">=6.0.0" },
