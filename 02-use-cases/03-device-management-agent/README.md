@@ -162,6 +162,20 @@ python test_lambda.py
 
 ### 2. Invoking tools using Q CLI
 
+#### Generating the Bearer Token
+
+To generate the Bearer token required for authentication, use the following curl command to request an access token from the Cognito OAuth2 endpoint:
+
+```bash
+curl --http1.1 -X POST https://<cognito domain>.auth.us-west-2.amazoncognito.com/oauth2/token \
+-H "Content-Type: application/x-www-form-urlencoded" \
+-d "grant_type=client_credentials&client_id=<client id>&client_secret=<client_secret>"
+```
+
+This command will return a JSON response containing the access token that should be used as the Bearer token in the MCP configuration.
+
+#### Configuring MCP
+
 Update the mcp.json file with this config:
 ```json
 cd ~/.aws/amazonq
@@ -183,9 +197,11 @@ vi mcp.json
 }
 ```
 
+Replace `<Bearer token>` with the access token obtained from the Cognito authentication request.
+
 ### 3. Sample prompts:
 
-1. "Can you list all the dorment devices?"
+1. "Can you list all the dormant devices?"
 2. "Can you update SSID for my device ID DG-10016 to XXXXXXXXXX'?"
 3. "Can you list all the available tools?"
 4. "Can you show me the device settings for the device ID DG-10016?"
