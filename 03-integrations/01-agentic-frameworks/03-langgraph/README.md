@@ -1,5 +1,14 @@
 # LangGraph Agent with Bedrock AgentCore Integration
 
+| Information         | Details                                                                      |
+|---------------------|------------------------------------------------------------------------------|
+| Agent type          | Synchronous                                                                 |
+| Agentic Framework   | Langgraph                                                                    |
+| LLM model           | Anthropic Claude 3 Haiku                                                     |
+| Components          | AgentCore Runtime                                |
+| Example complexity  | Easy                                                                 |
+| SDK used            | Amazon BedrockAgentCore Python SDK                                           |
+
 This example demonstrates how to integrate a LangGraph agent with AWS Bedrock AgentCore, enabling you to deploy a web search-capable agent as a managed service.
 
 ## Prerequisites
