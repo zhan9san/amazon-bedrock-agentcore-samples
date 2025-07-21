@@ -3,7 +3,6 @@ import json
 import time
 from boto3.session import Session
 
-
 def setup_cognito_user_pool():
     boto_session = Session()
     region = boto_session.region_name
@@ -104,7 +103,10 @@ def create_agentcore_role(agent_name):
                 "Effect": "Allow",
                 "Action": [
                     "ecr:BatchGetImage",
-                    "ecr:GetDownloadUrlForLayer"
+                    "ecr:GetDownloadUrlForLayer",
+                    "ecr:GetAuthorizationToken",
+                    "ecr: BatchGetImage",
+                    "ecr: GetDownloadUrlForLayer"
                 ],
                 "Resource": [
                     f"arn:aws:ecr:{region}:{account_id}:repository/*"
