@@ -1,20 +1,19 @@
 """
-Strands-based MCP Client for BAC Gateway
-Replaces custom MCP client with Strands SDK patterns
+Fixed MCP Client for MCP 1.10.0 compatibility
+This replaces the problematic mcp_client.py in your Lambda function
 """
 import os
 import logging
 import jwt
 from typing import Dict, Any, List, Optional
 from strands.tools.mcp.mcp_client import MCPClient
-from mcp.client.streamable_http import streamablehttp_client
 
 logger = logging.getLogger(__name__)
 
 class StrandsMCPClient:
     """
     Strands-based MCP client for BAC Gateway
-    Uses Strands SDK patterns for MCP communication
+    Fixed for MCP 1.10.0 compatibility
     """
     
     def __init__(self, gateway_url: Optional[str] = None):
@@ -69,16 +68,23 @@ class StrandsMCPClient:
                 logger.error("Cannot create MCP client: Gateway URL not set")
                 return
             
-            # Create Strands MCP client with same authentication as direct MCP calls
-            # Use only Bearer token, no JWT token to match working direct calls
-            self.mcp_client = MCPClient(lambda: streamablehttp_client(
-                url=self.gateway_url,
-                headers={
-                    "Authorization": f"Bearer {self.auth_token}",
-                    "Content-Type": "application/json",
-                    "Accept": "application/json"
-                }
-            ))
+            # FIXED: Create MCP client factory function for MCP 1.10.0 compatibility
+            def create_mcp_connection():
+                """Factory function to create MCP connection with correct MCP 1.10.0 API"""
+                from mcp.client.streamable_http import streamablehttp_client
+                
+                # MCP 1.10.0 returns (read_stream, write_stream, get_session_id)
+                return streamablehttp_client(
+                    url=self.gateway_url,
+                    headers={
+                        "Authorization": f"Bearer {self.auth_token}",
+                        "Content-Type": "application/json",
+                        "Accept": "application/json"
+                    }
+                )
+            
+            # Create Strands MCP client with the fixed connection factory
+            self.mcp_client = MCPClient(create_mcp_connection)
             
             # Start the MCP client (synchronous method)
             self.mcp_client.start()
@@ -182,3 +188,53 @@ class StrandsMCPClient:
                 self.mcp_client = None
         except Exception as e:
             logger.error(f"Error closing Strands MCP client: {str(e)}")
+
+
+# Alternative: Direct MCP 1.10.0 client (if Strands doesn't work)
+class DirectMCPClient:
+    """
+    Direct MCP 1.10.0 client as fallback
+    """
+    
+    def __init__(self, gateway_url: str, auth_token: str):
+        self.gateway_url = gateway_url
+        self.auth_token = auth_token
+        self.headers = {
+            "Authorization": f"Bearer {auth_token}",
+            "Content-Type": "application/json"
+        }
+        self.tools = []
+    
+    async def connect_and_get_tools(self):
+        """Connect to MCP gateway and get tools using MCP 1.10.0 API"""
+        from mcp.client.streamable_http import streamablehttp_client
+        from mcp import ClientSession
+        
+        try:
+            # MCP 1.10.0 correct API: returns (read_stream, write_stream, get_session_id)
+            async with streamablehttp_client(self.gateway_url, headers=self.headers) as (read_stream, write_stream, get_session_id):
+                async with ClientSession(read_stream, write_stream) as session:
+                    # Initialize session
+                    await session.initialize()
+                    
+                    # Get tools
+                    tools_result = await session.list_tools()
+                    self.tools = tools_result.tools
+                    
+                    logger.info(f"Direct MCP client connected: {len(self.tools)} tools")
+                    return self.tools
+                    
+        except Exception as e:
+            logger.error(f"Direct MCP client failed: {e}")
+            return []
+    
+    async def call_tool(self, name: str, arguments: dict):
+        """Call a tool using direct MCP connection"""
+        from mcp.client.streamable_http import streamablehttp_client
+        from mcp import ClientSession
+        
+        async with streamablehttp_client(self.gateway_url, headers=self.headers) as (read_stream, write_stream, get_session_id):
+            async with ClientSession(read_stream, write_stream) as session:
+                await session.initialize()
+                result = await session.call_tool(name, arguments)
+                return result

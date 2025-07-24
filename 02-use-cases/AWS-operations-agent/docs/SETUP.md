@@ -55,8 +55,7 @@ nano configs/bedrock-agentcore-config.json
 cd agent-lambda
 
 # Build and deploy
-sam build --use-container
-./deploy.sh dev
+./deploy.sh dev demo1
 
 # Get Lambda ARN
 LAMBDA_ARN=$(aws lambda get-function --function-name aws-operations-agent-dev --profile demo1 --query 'Configuration.FunctionArn' --output text)
@@ -164,8 +163,8 @@ This indicates a Docker architecture mismatch (ARM64 vs x86_64). Follow the trou
 > **⚠️ IMPORTANT: 64-Character Name Limit**
 > 
 > Bedrock AgentCore Gateway and Target names have a **64-character limit**. The scripts use short names to avoid this constraint:
-> - Gateway names: `dev-aws-resource-inspector-gateway-{random}` (auto-generated)
-> - Target names: `bac-tool` (Bedrock AgentCore tool - 8 chars)
+> - Gateway names: `gtw-{random}` (auto-generated)
+> - Target names: `dbac-tool` (Bedrock AgentCore tool - 8 chars)
 > 
 > Target names get prepended to tool names during invocation, so keeping them short is critical for longer tool names like `cloudformation_read_operations`.
 
@@ -179,8 +178,10 @@ source ../.venv/bin/activate
 python list-gateways.py
 
 # Create new gateway
-python create-gateway.py --environment dev
+python create-gateway.py --name gtw-345 --environment dev
 ```
+
+Note: If Gateway is throwing AccessDeniedException, please ensure bedrock_agentcore_role_name, bedrock_agentcore_role_arn and bedrock_agentcore_policy_name are correctly configured in bedrock-agentcore-config.json and exist in IAM.
 
 After gateway creation, note the Gateway ID and URL from the output, then:
 
@@ -195,7 +196,7 @@ After gateway creation, note the Gateway ID and URL from the output, then:
 cd scripts
 
 # Create target pointing to MCP Tool Lambda with SHORT name (critical for 64-char limit)
-python create-target.py --environment dev --lambda-arn $MCP_LAMBDA_ARN --name "bac-tool"
+python create-target.py --environment dev --lambda-arn $MCP_LAMBDA_ARN --name "dbac-tool"
 
 # Verify target creation
 python list-targets.py
@@ -232,7 +233,7 @@ ls -la ~/.okta_token
 # Verify all components are deployed
 aws lambda get-function --function-name aws-operations-agent-dev --profile demo1 > /dev/null && echo "✅ AWS Operations Agent Lambda"
 aws lambda get-function --function-name dev-bedrock-agentcore-mcp-tool --profile demo1 > /dev/null && echo "✅ MCP Tool Lambda"
-[ -f "~/.okta_token" ] && echo "✅ Okta token file" || echo "❌ Missing Okta token"
+[ -f ~/.okta_token ] && echo "✅ Okta token file" || echo "❌ Missing Okta token"
 ```
 
 ### **🔧 MANUAL STEP: Interactive Testing**
@@ -280,7 +281,7 @@ else:
 **Authentication Errors**:
 ```bash
 # Check Okta token
-if [ -f "~/.okta_token" ] && [ $(wc -c < ~/.okta_token) -gt 100 ]; then
+if [ -f ~/.okta_token ] && [ $(wc -c < ~/.okta_token) -gt 100 ]; then
     echo "✅ Okta token appears valid"
 else
     echo "❌ Okta token missing or invalid"

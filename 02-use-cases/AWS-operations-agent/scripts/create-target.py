@@ -144,7 +144,7 @@ def create_gateway_target(config_manager, environment, gateway_id, lambda_arn, t
     
     # Generate target name if not provided
     if not target_name:
-        target_name = "bac-tool"  # Short name for Bedrock AgentCore tools (8 chars)
+        target_name = "dbac-tool"  # Short name for Bedrock AgentCore tools (8 chars)
     
     if not description:
         description = f'AWS Resource Inspector Target for {environment} - {len(tool_schemas)} tools: hello_world, get_time, EC2, S3, Lambda, CloudFormation'
