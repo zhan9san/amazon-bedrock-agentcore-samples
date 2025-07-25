@@ -266,7 +266,7 @@ def get_env_secret(environment):
             print(response['Parameter']['Value'])
             return response['Parameter']['Value']
         except ssm_client.exceptions.ParameterNotFound:
-            error_message = f"Parameter not found: {parameter_name}"
+            error_message = f"Parameter not found: /AuroraOps/{environment}"
             print(error_message)
             raise Exception(error_message)
     elif environment == 'dev':
@@ -1529,27 +1529,51 @@ def format_multi_query_results(results):
 
 def lambda_handler(event, context):
     try:
-        environment = event['environment']
-        action_type = event['action_type']
+        print(f"Received event: {json.dumps(event)}")
+        
+        # Check if arguments are nested under 'arguments' key
+        if 'arguments' in event:
+            # Extract arguments from the nested structure
+            args = event['arguments']
+            environment = args.get('environment')
+            action_type = args.get('action_type')
+        else:
+            # Use the flat structure
+            environment = event.get('environment')
+            action_type = event.get('action_type')
+        
+        if not environment or not action_type:
+            return {
+                "functionResponse": {
+                    "content": f"Error: Missing required parameters. Need 'environment' and 'action_type'."
+                }
+            }
+            
         secret_name = get_env_secret(environment)
         min_exec_time = 1000
 
         # Get explain plan for a query
         if action_type == 'explain_query':
-            query = event['query']
+            query = event.get('query') if 'arguments' not in event else event['arguments'].get('query')
             print("Executing explain query scripts")
             results = analyze_query_performance(secret_name, query)
             formatted_results = format_analysis_output(results)
         elif action_type == 'extract_ddl':
-            object_type = event['object_type']
-            object_name = event['object_name']
-            object_schema = event['object_schema']
+            if 'arguments' in event:
+                object_type = event['arguments'].get('object_type')
+                object_name = event['arguments'].get('object_name')
+                object_schema = event['arguments'].get('object_schema')
+            else:
+                object_type = event.get('object_type')
+                object_name = event.get('object_name')
+                object_schema = event.get('object_schema')
+                
             print("Generating the DDL scripts for the object")
             results = extract_database_object_ddl(secret_name, object_type=object_type, object_name=object_name, object_schema=object_schema)
             # Convert results to string if it's not already
             formatted_results = str(results) if results else "No results found"
         elif action_type == 'execute_query':
-            query = event['query']
+            query = event.get('query') if 'arguments' not in event else event['arguments'].get('query')
             print("Executing read-only queries")
             results = validate_and_execute_queries(
                 secret_name,

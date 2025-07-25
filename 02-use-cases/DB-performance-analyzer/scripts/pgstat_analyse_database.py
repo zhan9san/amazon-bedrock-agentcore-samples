@@ -110,10 +110,11 @@ def execute_slow_query(secret_name, min_exec_time):
     }
     
     print("Connecting to the database...")
-    conn = connect_to_db(secret_name)
-    print("Connected to the database.")
-    
+    conn = None
     try:
+        conn = connect_to_db(secret_name)
+        print("Connected to the database.")
+    
         # First, ensure pg_stat_statements is installed
         print(" I am here 1")
         with conn.cursor() as cur:
@@ -282,8 +283,9 @@ def execute_connect_issues(secret_name, min_exec_time):
         """
     }
     
-    conn = connect_to_db(secret_name)
+    conn = None
     try:
+        conn = connect_to_db(secret_name)
         # First, ensure pg_stat_statements is installed
         
         with conn.cursor() as cur:
@@ -434,8 +436,9 @@ def execute_index_analysis(secret_name):
         """
     }
     
-    conn = connect_to_db(secret_name)
+    conn = None
     try:
+        conn = connect_to_db(secret_name)
         # First, ensure pg_stat_statements is installed
         
         with conn.cursor() as cur:
@@ -569,8 +572,9 @@ def execute_autovacuum_analysis(secret_name):
         """
     }
     
-    conn = connect_to_db(secret_name)
+    conn = None
     try:
+        conn = connect_to_db(secret_name)
         # First, ensure pg_stat_statements is installed
         
         with conn.cursor() as cur:
@@ -1159,19 +1163,19 @@ def get_env_secret(environment):
             # Get the secret name from Parameter Store
             print("in get_env_secret-try")
             response = ssm_client.get_parameter(
-                Name=f'/AuroraOpsGPT/{environment}'
+                Name=f'/AuroraOps/{environment}'
             )
             print(response['Parameter']['Value'])
             return response['Parameter']['Value']
         except ssm_client.exceptions.ParameterNotFound:
-            error_message = f"Parameter not found: {parameter_name}"
+            error_message = f"Parameter not found: /AuroraOps/{environment}"
             print(error_message)
             raise Exception(error_message)
     elif environment == 'dev':
         try:
             # Get the secret name from Parameter Store
             response = ssm_client.get_parameter(
-                Name=f'/AuroraOpsGPT/{environment}'
+                Name=f'/AuroraOps/{environment}'
             )
             return response['Parameter']['Value']
         except Exception as e:
@@ -1182,13 +1186,29 @@ def get_env_secret(environment):
 
 def lambda_handler(event, context):
     try:
-        print(event)
-        environment = event['environment']
-        action_type = event['action_type']
-        print("Environment: {}".format(environment))
+        print(f"Received event: {json.dumps(event)}")
+        
+        # Check if arguments are nested under 'arguments' key
+        if 'arguments' in event:
+            # Extract arguments from the nested structure
+            args = event['arguments']
+            environment = args.get('environment')
+            action_type = args.get('action_type')
+        else:
+            # Use the flat structure
+            environment = event.get('environment')
+            action_type = event.get('action_type')
+        
+        if not environment or not action_type:
+            return {
+                "functionResponse": {
+                    "content": f"Error: Missing required parameters. Need 'environment' and 'action_type'."
+                }
+            }
+            
+        print(f"Environment: {environment}")
         secret_name = get_env_secret(environment)
         min_exec_time = 1000
-        print(event)
         # Get slow queries
         #if tool_name == 'slow_query':
         if action_type == 'slow_query':
@@ -1245,8 +1265,9 @@ def lambda_handler(event, context):
         return function_response
 
     except Exception as e:
-        return json.dumps({
+        print(f"Error in lambda_handler: {str(e)}")
+        return {
             "functionResponse": {
                 "content": f"Error analyzing slow queries: {str(e)}"
             }
-        })
+        }
