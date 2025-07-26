@@ -17,14 +17,14 @@
 ## Step 1: Environment Setup
 
 ```bash
-cd 07-Operational-Support-Lambda-Web-Adapter
+cd AWS-operations-agent
 
 # Create virtual environment
 python3 -m venv .venv
 source .venv/bin/activate
 pip install boto3 python-dotenv requests
 
-# Verify AWS setup
+# Verify AWS setup - For convinience with scripts setup demo1 as profile in AWS Credentials file
 aws sts get-caller-identity --profile demo1
 ```
 
@@ -240,6 +240,8 @@ aws lambda get-function --function-name dev-bedrock-agentcore-mcp-tool --profile
 
 ```bash
 cd client
+python src/main.py
+# use verbose when troubleshooting (optional)
 python src/main.py --verbose
 
 # Test these commands:
