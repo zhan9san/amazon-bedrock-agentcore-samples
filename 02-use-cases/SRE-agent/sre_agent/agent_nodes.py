@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 
+import asyncio
 import logging
 from functools import lru_cache
 from pathlib import Path
@@ -13,21 +14,10 @@ from langchain_core.tools import BaseTool
 from langgraph.prebuilt import create_react_agent
 
 from .agent_state import AgentState
+from .constants import SREConstants
+from .prompt_loader import prompt_loader
 
-# Configure logging with basicConfig
-logging.basicConfig(
-    level=logging.INFO,  # Set the log level to INFO
-    # Define log message format
-    format="%(asctime)s,p%(process)s,{%(filename)s:%(lineno)d},%(levelname)s,%(message)s",
-)
-
-# Suppress MCP protocol logs
-mcp_loggers = ["streamable_http", "mcp.client.streamable_http", "httpx", "httpcore"]
-
-for logger_name in mcp_loggers:
-    mcp_logger = logging.getLogger(logger_name)
-    mcp_logger.setLevel(logging.WARNING)
-
+# Logging will be configured by the main entry point
 logger = logging.getLogger(__name__)
 
 
@@ -39,21 +29,27 @@ def _load_agent_config() -> Dict[str, Any]:
         return yaml.safe_load(f)
 
 
-def _create_llm(provider: str = "anthropic", **kwargs):
+def _create_llm(provider: str = "bedrock", **kwargs):
     """Create LLM instance based on provider."""
+    config = SREConstants.get_model_config(provider, **kwargs)
+
     if provider == "anthropic":
+        logger.info(f"Creating LLM - Provider: Anthropic, Model: {config['model_id']}")
         return ChatAnthropic(
-            model=kwargs.get("model_id", "claude-sonnet-4-20250514"),
-            max_tokens=kwargs.get("max_tokens", 4096),
-            temperature=kwargs.get("temperature", 0.1),
+            model=config["model_id"],
+            max_tokens=config["max_tokens"],
+            temperature=config["temperature"],
         )
     elif provider == "bedrock":
+        logger.info(
+            f"Creating LLM - Provider: Amazon Bedrock, Model: {config['model_id']}, Region: {config['region_name']}"
+        )
         return ChatBedrock(
-            model_id=kwargs.get("model_id", "us.amazon.nova-micro-v1:0"),
-            region_name=kwargs.get("region_name", "us-east-1"),
+            model_id=config["model_id"],
+            region_name=config["region_name"],
             model_kwargs={
-                "temperature": kwargs.get("temperature", 0.1),
-                "max_tokens": kwargs.get("max_tokens", 4096),
+                "temperature": config["temperature"],
+                "max_tokens": config["max_tokens"],
             },
         )
     else:
@@ -93,163 +89,52 @@ class BaseAgentNode:
         name: str,
         description: str,
         tools: List[BaseTool],
-        llm_provider: str = "anthropic",
+        llm_provider: str = "bedrock",
         **llm_kwargs,
     ):
         self.name = name
         self.description = description
         self.tools = tools
+        self.llm_provider = llm_provider
+
+        logger.info(f"Initializing {name} with LLM provider: {llm_provider}")
         self.llm = _create_llm(llm_provider, **llm_kwargs)
 
         # Create the react agent
         self.agent = create_react_agent(self.llm, self.tools)
 
     def _get_system_prompt(self) -> str:
-        """Get system prompt for this agent."""
-        base_prompt = f"""You are the {self.name}.
-{self.description}
+        """Get system prompt for this agent using prompt loader."""
+        try:
+            # Determine agent type based on name
+            agent_type = self._get_agent_type()
 
-You have access to specific tools related to your domain. Use them to help answer questions
-and solve problems related to your area of expertise. Be concise and factual in your responses.
+            # Use prompt loader to get complete prompt
+            return prompt_loader.get_agent_prompt(
+                agent_type=agent_type,
+                agent_name=self.name,
+                agent_description=self.description,
+            )
+        except Exception as e:
+            logger.error(f"Error loading prompt for agent {self.name}: {e}")
+            # Fallback to basic prompt if loading fails
+            return f"You are the {self.name}. {self.description}"
 
-CRITICAL: ALWAYS quote your data sources when making statements about investigations and recommendations. 
-For every claim, finding, or recommendation you make, include the specific source:
-- For tool results: "According to [tool_name] output..." or "Based on [tool_name] data..."
-- For specific data points: "The [metric_name] shows [value] (source: [tool_name])"
-- For runbook procedures: "Per runbook [runbook_id]: [step_details]"
-- For status information: "Current status from [tool_name]: [status_details]"
+    def _get_agent_type(self) -> str:
+        """Determine agent type based on agent name."""
+        name_lower = self.name.lower()
 
-This source attribution is essential for SRE lineage tracking and verification.
-
-MANDATORY ANTI-HALLUCINATION RULE: If no data is available from your tools or if tools return empty results, you MUST clearly state "No data available" or "No results found" rather than fabricating plausible-sounding information. Never invent log entries, metrics values, timestamps, pod names, error messages, or any other data that was not actually returned by your tools. 
-
-SERVICE/POD VALIDATION REQUIREMENT: If the user asks about a specific service or pod name that you cannot find in your tool results, you MUST explicitly state: "I do not see the exact [service/pod] '[name]' in the available data. Based on my understanding of the issue, I'm investigating related services that might be impacting the problem you described. The analysis below represents my assessment of services that could be related to your query."
-
-FORBIDDEN BEHAVIORS:
-- Creating fake log entries with specific timestamps when tools return empty
-- Inventing error messages, stack traces, or database connection strings  
-- Making up metric values, percentages, or performance numbers
-- Fabricating pod names, service names, or configuration details
-- Creating plausible but false narrative details to fill information gaps
-- Pretending non-existent services or pods exist in the system
-
-Accuracy is critical for SRE operations - wrong information can lead to incorrect troubleshooting decisions.
-
-If a question is outside your domain of expertise, acknowledge this and suggest which other
-agent might be better suited to help."""
-
-        # Add specific instructions for Kubernetes agent
-        if "Kubernetes" in self.name:
-            base_prompt += """
-
-IMPORTANT: If the user doesn't specify a namespace, check the 'production' namespace first and inform the user that you're checking production. Let them know they can specify a different namespace if needed.
-
-KUBERNETES SOURCE ATTRIBUTION EXAMPLES:
-- "Based on 'kubectl get pods' output from get_pod_status tool: Pod database-pod-xyz is in CrashLoopBackOff state"
-- "According to get_deployment_status tool results: Deployment has 2/3 replicas ready"
-- "Per get_cluster_events data: Last event shows 'Failed to pull image' at 14:32:15"
-- "get_resource_usage tool indicates: CPU usage at 85% (source: metrics-server)"""
-
-        # Add specific instructions for Runbooks agent
-        elif "Runbooks" in self.name or "Operational" in self.name:
-            base_prompt += """
-
-CRITICAL RUNBOOK INSTRUCTIONS:
-- NEVER just describe what a runbook contains - ALWAYS show the complete, verbatim steps
-- DO NOT say "the runbook provides 6 steps" - SHOW ALL 6 STEPS with full details
-- NEVER use phrases like "runbook is ready for execution" - DISPLAY the actual execution steps
-- Copy and paste the ENTIRE runbook content, including all commands, parameters, and procedures
-- Include the full runbook identification (name, ID, version) at the top
-- Show every step with specific kubectl commands, bash scripts, or other executable instructions
-- Include all safety checks, verification commands, and expected outputs
-- Display rollback procedures and troubleshooting steps if provided
-- Format with clear numbering, code blocks, and proper markdown
-
-MANDATORY: You MUST show the complete runbook content. SREs need the actual steps to execute, not summaries.
-
-RUNBOOK SOURCE ATTRIBUTION REQUIREMENTS:
-- ALWAYS start with: "Per runbook [runbook_id] from [tool_name] tool:"
-- Include runbook metadata: "**Source:** [tool_name] query result | **Runbook ID:** [id] | **Title:** [title]"
-- For each step, maintain: "Step X from runbook [runbook_id]: [actual_step_content]"
-- Include escalation info with source: "Escalation procedures (source: runbook [runbook_id]): [contact_details]"
-
-EXAMPLE (showing full content with sources):
-**Source:** search_runbooks tool result | **Runbook ID:** DB-001 | **Title:** Database Pod Recovery
-
-Per runbook DB-001 from search_runbooks tool:
-
-### Step 1 from runbook DB-001: Verify Current State
-```bash
-kubectl get pods -n production | grep database
-kubectl describe pod database-pod -n production
-```
-**Expected Output (per runbook DB-001):** Pod status showing CrashLoopBackOff
-
-[Continue showing ALL steps with source attribution...]
-
-Remember: Show the COMPLETE runbook with proper source attribution for SRE lineage tracking."""
-
-        # Add specific instructions for Logs agent
-        elif "Logs" in self.name or "Application" in self.name:
-            base_prompt += """
-
-LOGS SOURCE ATTRIBUTION REQUIREMENTS:
-- Always cite the specific log tool used: "According to search_logs tool results:" or "Based on get_error_logs data:"
-- Include timestamps and log sources: "Log entry from [timestamp] (source: search_logs): [log_message]"
-- Reference log patterns with tool source: "analyze_log_patterns tool identified: [pattern_details]"
-- Quote specific log entries: "Error log from get_error_logs: '[actual_log_line]' at [timestamp]"
-- Include log context: "From get_recent_logs for service [service_name]: [log_context]"
-
-CRITICAL ANTI-HALLUCINATION RULES FOR LOGS:
-- If search_logs returns empty/no results, say "No log entries found" - DO NOT create fake log entries
-- If get_error_logs returns no data, say "No error logs available" - DO NOT invent error messages
-- If get_recent_logs returns empty, say "No recent logs found" - DO NOT fabricate log entries with timestamps
-- NEVER create log entries with specific timestamps (like 14:22:00.123Z) unless they came directly from tool output
-- NEVER invent exact error messages, database connection strings, or stack traces
-- If tools return "No data available", prominently state this rather than speculating
-
-VALID EXAMPLES:
-- "According to search_logs tool: No entries found for 'payment-service' pattern"
-- "get_error_logs data: No error logs available for payment-service in the last 24 hours"
-- "search_logs tool found ConfigMap error: '[exact_log_line]' at [exact_timestamp_from_tool]"
-
-FORBIDDEN EXAMPLES:
-- Creating entries like "Database connection timeout at 14:22:00.123Z" when tools returned empty
-- Inventing specific error messages when no errors were found
-- Making up log counts or patterns when analyze_log_patterns returned no data
-"""
-
-        # Add specific instructions for Metrics agent
-        elif "Metrics" in self.name or "Performance" in self.name:
-            base_prompt += """
-
-METRICS SOURCE ATTRIBUTION REQUIREMENTS:
-- Always cite the metrics tool source: "Per get_performance_metrics data:" or "According to get_resource_metrics:"
-- Include metric names and values with sources: "[metric_name]: [value] (source: [tool_name])"
-- Reference time ranges: "get_performance_metrics for last 1h shows: [metric_details]"
-- Quote exact metric values: "CPU utilization: 85.3% (source: get_resource_metrics)"
-- Include trend analysis sources: "analyze_trends tool indicates: [trend_information]"
-
-CRITICAL ANTI-HALLUCINATION RULES FOR METRICS:
-- If get_performance_metrics returns no data, say "No performance metrics available" - DO NOT invent response times
-- If get_resource_metrics returns empty, say "No resource metrics found" - DO NOT create CPU/memory percentages
-- If analyze_trends returns no data, say "No trend data available" - DO NOT fabricate anomaly details
-- NEVER create specific metric values (like 2,500ms, 85.3%) unless they came directly from tool output
-- NEVER invent error rate percentages, availability numbers, or threshold violations
-- If tools return "No data available", state this clearly rather than creating plausible numbers
-
-VALID EXAMPLES:
-- "get_performance_metrics: No data available for api-gateway service"
-- "According to get_resource_metrics: CPU: 45%, Memory: 60% (source: metrics data)"
-- "analyze_trends tool indicates: No trend data found for the requested timeframe"
-
-FORBIDDEN EXAMPLES:
-- Creating metrics like "Response time: 2,500ms average" when tools returned no data
-- Inventing specific percentages when get_error_rates returned empty
-- Making up anomaly details when analyze_trends found no patterns
-"""
-
-        return base_prompt
+        if "kubernetes" in name_lower:
+            return "kubernetes"
+        elif "logs" in name_lower or "application" in name_lower:
+            return "logs"
+        elif "metrics" in name_lower or "performance" in name_lower:
+            return "metrics"
+        elif "runbooks" in name_lower or "operational" in name_lower:
+            return "runbooks"
+        else:
+            logger.warning(f"Unknown agent type for agent: {self.name}")
+            return "unknown"
 
     async def __call__(self, state: AgentState) -> Dict[str, Any]:
         """Process the current state and return updated state."""
@@ -262,6 +147,10 @@ FORBIDDEN EXAMPLES:
                 f"As the {self.name}, help with: {state.get('current_query', '')}"
             )
 
+            # If auto_approve_plan is set, add instruction to not ask follow-up questions
+            if state.get("auto_approve_plan", False):
+                agent_prompt += "\n\nIMPORTANT: Provide a complete, actionable response without asking any follow-up questions. Do not ask if the user wants more details or if they would like you to investigate further."
+
             # We'll collect all messages and the final response
             all_messages = []
             agent_response = ""
@@ -270,28 +159,97 @@ FORBIDDEN EXAMPLES:
             system_message = SystemMessage(content=self._get_system_prompt())
             user_message = HumanMessage(content=agent_prompt)
 
-            # Stream the agent execution to capture tool calls
-            async for chunk in self.agent.astream(
-                {"messages": [system_message] + messages + [user_message]}
-            ):
-                if "agent" in chunk:
-                    agent_step = chunk["agent"]
-                    if "messages" in agent_step:
-                        for msg in agent_step["messages"]:
-                            all_messages.append(msg)
-                            # Always capture the latest content from AIMessages
-                            if (
-                                hasattr(msg, "content")
-                                and hasattr(msg, "__class__")
-                                and "AIMessage" in str(msg.__class__)
-                            ):
-                                agent_response = msg.content
+            # Stream the agent execution to capture tool calls with timeout
+            logger.info(f"{self.name} - Starting agent execution")
 
-                elif "tools" in chunk:
-                    tools_step = chunk["tools"]
-                    if "messages" in tools_step:
-                        for msg in tools_step["messages"]:
-                            all_messages.append(msg)
+            try:
+                # Add timeout to prevent infinite hanging (120 seconds)
+                timeout_seconds = 120
+
+                async def execute_agent():
+                    nonlocal agent_response  # Fix scope issue - allow access to outer variable
+                    chunk_count = 0
+                    async for chunk in self.agent.astream(
+                        {"messages": [system_message] + messages + [user_message]}
+                    ):
+                        chunk_count += 1
+                        logger.info(
+                            f"{self.name} - Processing chunk #{chunk_count}: {list(chunk.keys())}"
+                        )
+
+                        if "agent" in chunk:
+                            agent_step = chunk["agent"]
+                            if "messages" in agent_step:
+                                for msg in agent_step["messages"]:
+                                    all_messages.append(msg)
+                                    # Log tool calls being made
+                                    if hasattr(msg, "tool_calls") and msg.tool_calls:
+                                        logger.info(
+                                            f"{self.name} - Agent making {len(msg.tool_calls)} tool calls"
+                                        )
+                                        for tc in msg.tool_calls:
+                                            tool_name = tc.get("name", "unknown")
+                                            tool_args = tc.get("args", {})
+                                            tool_id = tc.get("id", "unknown")
+                                            logger.info(
+                                                f"{self.name} - Tool call: {tool_name} (id: {tool_id})"
+                                            )
+                                            logger.debug(
+                                                f"{self.name} - Tool args: {tool_args}"
+                                            )
+                                    # Always capture the latest content from AIMessages
+                                    if (
+                                        hasattr(msg, "content")
+                                        and hasattr(msg, "__class__")
+                                        and "AIMessage" in str(msg.__class__)
+                                    ):
+                                        agent_response = msg.content
+                                        logger.info(
+                                            f"{self.name} - Agent response captured: {agent_response[:100]}... (total: {len(str(agent_response))} chars)"
+                                        )
+
+                        elif "tools" in chunk:
+                            tools_step = chunk["tools"]
+                            logger.info(
+                                f"{self.name} - Tools chunk received, processing {len(tools_step.get('messages', []))} messages"
+                            )
+                            if "messages" in tools_step:
+                                for msg in tools_step["messages"]:
+                                    all_messages.append(msg)
+                                    # Log tool executions
+                                    if hasattr(msg, "tool_call_id"):
+                                        tool_name = getattr(msg, "name", "unknown")
+                                        tool_call_id = getattr(
+                                            msg, "tool_call_id", "unknown"
+                                        )
+                                        content_preview = (
+                                            str(msg.content)[:200]
+                                            if hasattr(msg, "content")
+                                            else "No content"
+                                        )
+                                        logger.info(
+                                            f"{self.name} - Tool response received: {tool_name} (id: {tool_call_id}), content: {content_preview}..."
+                                        )
+                                        logger.debug(
+                                            f"{self.name} - Full tool response: {msg.content if hasattr(msg, 'content') else 'No content'}"
+                                        )
+
+                logger.info(
+                    f"{self.name} - Executing agent with timeout of {timeout_seconds} seconds"
+                )
+                await asyncio.wait_for(execute_agent(), timeout=timeout_seconds)
+                logger.info(f"{self.name} - Agent execution completed")
+
+            except asyncio.TimeoutError:
+                logger.error(
+                    f"{self.name} - Agent execution timed out after {timeout_seconds} seconds"
+                )
+                agent_response = f"Agent execution timed out after {timeout_seconds} seconds. The agent may be stuck on a tool call or LLM response."
+
+            except Exception as e:
+                logger.error(f"{self.name} - Agent execution failed: {e}")
+                logger.exception("Full exception details:")
+                agent_response = f"Agent execution failed: {str(e)}"
 
             # Debug: Check what we captured
             logger.info(

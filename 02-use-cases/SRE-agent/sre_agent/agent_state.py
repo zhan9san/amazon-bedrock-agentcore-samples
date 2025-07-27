@@ -46,3 +46,6 @@ class AgentState(TypedDict):
 
     # Final aggregated response (set by supervisor)
     final_response: Optional[str]
+
+    # Auto-approve plans without user confirmation (defaults to False)
+    auto_approve_plan: Optional[bool]

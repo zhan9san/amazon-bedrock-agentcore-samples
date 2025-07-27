@@ -81,7 +81,7 @@ async def _prepare_initial_state(state: AgentState) -> Dict[str, Any]:
 
 
 def build_multi_agent_graph(
-    tools: List[BaseTool], llm_provider: str = "anthropic", **llm_kwargs
+    tools: List[BaseTool], llm_provider: str = "bedrock", **llm_kwargs
 ) -> StateGraph:
     """Build the multi-agent collaboration graph.
 

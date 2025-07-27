@@ -20,28 +20,15 @@ from langchain_mcp_adapters.client import MultiServerMCPClient
 from langgraph.errors import GraphRecursionError
 
 from .agent_state import AgentState
+from .constants import SREConstants
 from .graph_builder import build_multi_agent_graph
+from .logging_config import configure_logging, should_show_debug_traces
 
-# Configure logging with basicConfig
-logging.basicConfig(
-    level=logging.INFO,  # Set the log level to INFO
-    # Define log message format
-    format="%(asctime)s,p%(process)s,{%(filename)s:%(lineno)d},%(levelname)s,%(message)s",
-)
-
-# Suppress HTTP request logs from showing in console
-http_loggers = [
-    "httpx",
-    "httpcore",
-    "streamable_http",
-    "mcp.client.streamable_http",
-    # 'anthropic._client',
-    # 'anthropic._base_client'
-]
-
-for logger_name in http_loggers:
-    http_logger = logging.getLogger(logger_name)
-    http_logger.setLevel(logging.WARNING)  # Only show warnings and errors in console
+# Configure logging if not already configured (e.g., when imported by agent_runtime)
+if not logging.getLogger().handlers:
+    # Check if DEBUG is already set in environment
+    debug_from_env = os.getenv("DEBUG", "false").lower() in ("true", "1", "yes")
+    configure_logging(debug_from_env)
 
 logger = logging.getLogger(__name__)
 
@@ -56,9 +43,9 @@ class Spinner:
         self.message = message
         self.show_time = show_time
         self.spinning = False
-        self.thread = None
-        self.start_time = None
-        self.spinner_chars = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"]
+        self.thread: Optional[threading.Thread] = None
+        self.start_time: Optional[float] = None
+        self.spinner_chars = SREConstants.app.spinner_chars
 
     def __enter__(self):
         self.start()
@@ -119,7 +106,15 @@ def _save_final_response_to_markdown(
 
     # Create filename with query and timestamp
     # Clean the query string for filename use
-    clean_query = query.replace(" ", "_").replace("/", "_").replace("\\", "_").replace("?", "_").replace(":", "_").replace(",", "_").replace(".", "_")
+    clean_query = (
+        query.replace(" ", "_")
+        .replace("/", "_")
+        .replace("\\", "_")
+        .replace("?", "_")
+        .replace(":", "_")
+        .replace(",", "_")
+        .replace(".", "_")
+    )
     # Remove special characters that might cause issues
     clean_query = "".join(c for c in clean_query if c.isalnum() or c in "_-")
     # Remove leading/trailing underscores and collapse multiple underscores
@@ -130,7 +125,7 @@ def _save_final_response_to_markdown(
     # Ensure we have a meaningful filename
     if not clean_query or len(clean_query) < 3:
         clean_query = "query"
-    
+
     timestamp_str = timestamp.strftime("%Y%m%d_%H%M%S")
     filename = f"{clean_query}_{timestamp_str}.md"
     filepath = output_path / filename
@@ -234,7 +229,7 @@ def create_mcp_client() -> MultiServerMCPClient:
 
 
 async def create_multi_agent_system(
-    provider: str = "anthropic", checkpointer=None, **llm_kwargs
+    provider: str = "bedrock", checkpointer=None, **llm_kwargs
 ):
     """Create multi-agent system with MCP tools."""
     logger.info(f"Creating multi-agent system with provider: {provider}")
@@ -247,20 +242,29 @@ async def create_multi_agent_system(
     mcp_tools = []
     try:
         client = create_mcp_client()
-        all_mcp_tools = await client.get_tools()
+        # Add timeout for MCP tool loading to prevent hanging
+        all_mcp_tools = await asyncio.wait_for(
+            client.get_tools(), timeout=SREConstants.timeouts.mcp_tools_timeout_seconds
+        )
 
         # Don't filter out x-amz-agentcore-search as it's a global tool
         mcp_tools = all_mcp_tools
 
         logger.info(f"Retrieved {len(mcp_tools)} tools from MCP")
 
-        # Print tool information
-        print(f"\nMCP tools loaded: {len(mcp_tools)}")
-        for tool in mcp_tools:
-            tool_name = getattr(tool, "name", "unknown")
-            tool_desc = getattr(tool, "description", "No description")
-            print(f"  - {tool_name}: {tool_desc[:80]}...")
+        # Print tool information (only in debug mode)
+        logger.info(f"MCP tools loaded: {len(mcp_tools)}")
+        if should_show_debug_traces():
+            print(f"\nMCP tools loaded: {len(mcp_tools)}")
+            for tool in mcp_tools:
+                tool_name = getattr(tool, "name", "unknown")
+                tool_desc = getattr(tool, "description", "No description")
+                print(f"  - {tool_name}: {tool_desc[:80]}...")
+                logger.info(f"  - {tool_name}: {tool_desc[:80]}...")
 
+    except asyncio.TimeoutError:
+        logger.warning("MCP tool loading timed out after 30 seconds")
+        mcp_tools = []
     except Exception as e:
         logger.warning(f"Failed to load MCP tools: {e}")
         mcp_tools = []
@@ -269,15 +273,18 @@ async def create_multi_agent_system(
     local_tools = [get_current_time]
     all_tools = local_tools + mcp_tools
 
-    print(f"\nAdditional local tools: {len(local_tools)}")
-    for tool in local_tools:
-        # Extract just the first line of description
-        description = (
-            tool.description.split("\n")[0].strip()
-            if tool.description
-            else "No description"
-        )
-        print(f"  - {tool.name}: {description}")
+    logger.info(f"Additional local tools: {len(local_tools)}")
+    if should_show_debug_traces():
+        print(f"\nAdditional local tools: {len(local_tools)}")
+        for tool in local_tools:
+            # Extract just the first line of description
+            description = (
+                tool.description.split("\n")[0].strip()
+                if tool.description
+                else "No description"
+            )
+            print(f"  - {tool.name}: {description}")
+            logger.info(f"  - {tool.name}: {description}")
 
     # Build the multi-agent graph
     graph = build_multi_agent_graph(
@@ -290,7 +297,7 @@ async def create_multi_agent_system(
 def _save_conversation_state(
     messages: list,
     state: Dict[str, Any],
-    filename: str = ".multi_agent_conversation_state.json",
+    filename: str = SREConstants.app.conversation_state_file,
 ):
     """Save conversation state to a file."""
     try:
@@ -336,7 +343,7 @@ def _save_conversation_state(
 
 
 def _load_conversation_state(
-    filename: str = ".multi_agent_conversation_state.json",
+    filename: str = SREConstants.app.conversation_state_file,
 ) -> tuple[Optional[list], Optional[Dict[str, Any]]]:
     """Load conversation state from a file."""
     try:
@@ -363,16 +370,19 @@ async def _run_interactive_session(
     # Track the original query for report naming (resets after each /savereport)
     original_query = None
     print("\n🤖 Starting interactive multi-agent SRE assistant...")
+    logger.info("🤖 Starting interactive multi-agent SRE assistant...")
     print("Commands:")
     print("  /exit or /quit - End the session")
-    print("  /clear - Clear conversation history") 
+    print("  /clear - Clear conversation history")
     print("  /save - Save conversation state")
     print("  /load - Load previous conversation state")
     print("  /savereport - Save the last query's investigation report")
     print("  /history - Show conversation history")
     print("  /agents - Show available agents")
     print("  /help - Show this help message")
-    print("\nNote: Investigation reports are not saved automatically in interactive mode.")
+    print(
+        "\nNote: Investigation reports are not saved automatically in interactive mode."
+    )
     print("      Use /savereport to save the last query's report when needed.")
     print("\n" + "=" * 80 + "\n")
 
@@ -455,7 +465,9 @@ async def _run_interactive_session(
                     else:
                         print("❌ Failed to save report")
                 else:
-                    print("❌ No investigation report available to save. Complete a query first.")
+                    print(
+                        "❌ No investigation report available to save. Complete a query first."
+                    )
                 continue
 
             elif user_input.lower() == "/history":
@@ -499,13 +511,19 @@ async def _run_interactive_session(
                 print("  /agents - Show available agents")
                 print("  /help - Show this help message")
                 print("\nReport Saving:")
-                print("  • Investigation reports are NOT saved automatically in interactive mode")
+                print(
+                    "  • Investigation reports are NOT saved automatically in interactive mode"
+                )
                 print("  • Use /savereport after completing a query to save its report")
                 print("  • Reports are saved as markdown files with descriptive names")
                 print("  • Use /save to save conversation state separately")
                 print("\nTips:")
-                print("  • Ask specific questions about infrastructure, logs, metrics, or procedures")
-                print("  • The agents will collaborate to provide comprehensive answers")
+                print(
+                    "  • Ask specific questions about infrastructure, logs, metrics, or procedures"
+                )
+                print(
+                    "  • The agents will collaborate to provide comprehensive answers"
+                )
                 print("  • You can continue conversations and ask follow-up questions")
                 continue
 
@@ -518,6 +536,7 @@ async def _run_interactive_session(
 
             # Process with multi-agent system
             print("\n🤖 Multi-Agent System: Processing...\n")
+            logger.info("🤖 Multi-Agent System: Processing...")
 
             # Add user message
             messages.append(HumanMessage(content=user_input))
@@ -532,6 +551,7 @@ async def _run_interactive_session(
                 "requires_collaboration": False,
                 "agents_invoked": [],
                 "final_response": None,
+                "auto_approve_plan": False,  # Default to False for interactive mode
             }
 
             # Stream the graph execution
@@ -540,7 +560,17 @@ async def _run_interactive_session(
                 spinner = Spinner("🧭 Supervisor analyzing query")
                 spinner.start()
 
+                # Stream with timeout protection
+                timeout_seconds = SREConstants.timeouts.graph_execution_timeout_seconds
+                start_time = asyncio.get_event_loop().time()
+
                 async for event in graph.astream(initial_state):
+                    # Check for timeout
+                    elapsed = asyncio.get_event_loop().time() - start_time
+                    if elapsed > timeout_seconds:
+                        raise asyncio.TimeoutError(
+                            f"Graph execution exceeded {timeout_seconds} seconds"
+                        )
                     # Stop spinner when we get an event
                     if spinner:
                         spinner.stop()
@@ -558,19 +588,23 @@ async def _run_interactive_session(
                                 plan_text = metadata.get("plan_text", "")
                                 if plan_text:
                                     print(f"\n📋 {plan_text}")
+                                    logger.info(f"📋 {plan_text}")
                             elif metadata.get("show_plan") and not metadata.get(
                                 "plan_shown"
                             ):
                                 plan_text = metadata.get("plan_text", "")
                                 if plan_text:
                                     print(f"\n📋 {plan_text}")
+                                    logger.info(f"📋 {plan_text}")
                                 # Mark plan as shown to avoid repetition
                                 metadata["plan_shown"] = True
 
                             if next_agent != "FINISH":
                                 print(f"🧭 Supervisor: Routing to {next_agent}")
+                                logger.info(f"🧭 Supervisor: Routing to {next_agent}")
                                 if reasoning:
                                     print(f"   Reasoning: {reasoning}")
+                                    logger.info(f"   Reasoning: {reasoning}")
                                 # Start spinner for next agent
                                 agent_display = next_agent.replace("_", " ").title()
                                 spinner = Spinner(f"🤖 {agent_display} thinking")
@@ -586,6 +620,7 @@ async def _run_interactive_session(
                         ]:
                             agent_name = node_name.replace("_agent", "").title()
                             print(f"\n🔧 {agent_name} Agent:")
+                            logger.info(f"🔧 {agent_name} Agent:")
 
                             # Extract and display tool traces from metadata
                             metadata = node_output.get("metadata", {})
@@ -596,11 +631,12 @@ async def _run_interactive_session(
                                     agent_messages = value
                                     break
 
-                            # Show debug info about trace messages found
-                            print(
-                                f"   🔍 DEBUG: agent_messages = {len(agent_messages) if agent_messages else 0}"
-                            )
-                            if agent_messages:
+                            # Show debug info about trace messages found (only in debug mode)
+                            if should_show_debug_traces():
+                                print(
+                                    f"   🔍 DEBUG: agent_messages = {len(agent_messages) if agent_messages else 0}"
+                                )
+                            if agent_messages and should_show_debug_traces():
                                 print(
                                     f"   📋 Found {len(agent_messages)} trace messages:"
                                 )
@@ -621,52 +657,66 @@ async def _run_interactive_session(
                                         print(
                                             f"         Tool response for: {getattr(msg, 'tool_call_id', 'unknown')}"
                                         )
-                            else:
+                            elif should_show_debug_traces():
                                 print("   ⚠️  No trace messages found in metadata")
+                                logger.info("   ⚠️  No trace messages found in metadata")
 
-                            # Display tool calls and results like in langgraph_agent.py
-                            for msg in agent_messages:
-                                if hasattr(msg, "tool_calls") and msg.tool_calls:
-                                    print("   📞 Calling tools:")
-                                    for tc in msg.tool_calls:
-                                        tool_name = tc.get("name", "unknown")
-                                        tool_args = tc.get("args", {})
-                                        tool_id = tc.get("id", "unknown")
-                                        print(f"      {tool_name}(")
-                                        if tool_args:
-                                            for (
-                                                arg_name,
-                                                arg_value,
-                                            ) in tool_args.items():
-                                                # Show full values
-                                                value_str = repr(arg_value)
-                                                print(f"        {arg_name}={value_str}")
-                                        print(f"      ) [id: {tool_id}]")
+                            # Display tool calls and results like in langgraph_agent.py (only in debug mode)
+                            if should_show_debug_traces():
+                                for msg in agent_messages:
+                                    if hasattr(msg, "tool_calls") and msg.tool_calls:
+                                        print("   📞 Calling tools:")
+                                        logger.info("   📞 Calling tools:")
+                                        for tc in msg.tool_calls:
+                                            tool_name = tc.get("name", "unknown")
+                                            tool_args = tc.get("args", {})
+                                            tool_id = tc.get("id", "unknown")
+                                            print(f"      {tool_name}(")
+                                            logger.info(f"      {tool_name}(")
+                                            if tool_args:
+                                                for (
+                                                    arg_name,
+                                                    arg_value,
+                                                ) in tool_args.items():
+                                                    # Show full values
+                                                    value_str = repr(arg_value)
+                                                    print(
+                                                        f"        {arg_name}={value_str}"
+                                                    )
+                                                    logger.info(
+                                                        f"        {arg_name}={value_str}"
+                                                    )
+                                            print(f"      ) [id: {tool_id}]")
+                                            logger.info(f"      ) [id: {tool_id}]")
 
-                                elif hasattr(msg, "tool_call_id"):
-                                    # This is a tool response
-                                    tool_name = getattr(msg, "name", "unknown_tool")
-                                    tool_call_id = getattr(
-                                        msg, "tool_call_id", "unknown"
-                                    )
-                                    result_content = msg.content
+                                    elif hasattr(msg, "tool_call_id"):
+                                        # This is a tool response
+                                        tool_name = getattr(msg, "name", "unknown_tool")
+                                        tool_call_id = getattr(
+                                            msg, "tool_call_id", "unknown"
+                                        )
+                                        result_content = msg.content
 
-                                    print(f"   🛠️  {tool_name} [id: {tool_call_id}]:")
-                                    if isinstance(result_content, str):
-                                        try:
-                                            parsed_result = json.loads(result_content)
-                                            # Pretty print full output
-                                            formatted = json.dumps(
-                                                parsed_result, indent=2
-                                            )
-                                            lines = formatted.split("\n")
-                                            for line in lines:
-                                                print(f"      {line}")
-                                        except:
-                                            # Not JSON, print full string
-                                            lines = result_content.split("\n")
-                                            for line in lines:
-                                                print(f"      {line}")
+                                        print(
+                                            f"   🛠️  {tool_name} [id: {tool_call_id}]:"
+                                        )
+                                        if isinstance(result_content, str):
+                                            try:
+                                                parsed_result = json.loads(
+                                                    result_content
+                                                )
+                                                # Pretty print full output
+                                                formatted = json.dumps(
+                                                    parsed_result, indent=2
+                                                )
+                                                lines = formatted.split("\n")
+                                                for line in lines:
+                                                    print(f"      {line}")
+                                            except:
+                                                # Not JSON, print full string
+                                                lines = result_content.split("\n")
+                                                for line in lines:
+                                                    print(f"      {line}")
 
                             # Show agent's full final response
                             agent_results = node_output.get("agent_results", {})
@@ -678,20 +728,35 @@ async def _run_interactive_session(
                                 ):
                                     if result:
                                         print("   💡 Full Response:")
+                                        logger.info("   💡 Full Response:")
                                         print(f"      {result}")
+                                        logger.info(f"      {result}")
 
                         elif node_name == "aggregate":
                             final_response = node_output.get("final_response", "")
                             if final_response:
                                 print(f"\n💬 Final Response:\n{final_response}")
+                                logger.info(f"💬 Final Response: {final_response}")
                                 # Add assistant message to history
                                 messages.append(AIMessage(content=final_response))
                                 # Store for /savereport command instead of auto-saving
                                 if save_markdown:
                                     last_query = user_input
                                     last_response = final_response
-                                    print("\n💡 Use /savereport to save this investigation report.")
+                                    print(
+                                        "\n💡 Use /savereport to save this investigation report."
+                                    )
 
+            except asyncio.TimeoutError:
+                if spinner:
+                    spinner.stop()
+                print(
+                    "\n❌ Error: Investigation timed out after 10 minutes. The system may be stuck."
+                )
+                print(
+                    "💡 Tip: Try rephrasing your question or breaking it into smaller parts."
+                )
+                logger.error("Graph execution timed out after 600 seconds")
             except GraphRecursionError:
                 if spinner:
                     spinner.stop()
@@ -733,6 +798,11 @@ async def main():
         help="Model provider to use (default: anthropic)",
     )
     parser.add_argument(
+        "--debug",
+        action="store_true",
+        help="Enable debug logging and trace output",
+    )
+    parser.add_argument(
         "--prompt",
         help="Single prompt to send to the multi-agent system (if not provided, starts interactive mode)",
     )
@@ -749,8 +819,8 @@ async def main():
     )
     parser.add_argument(
         "--output-dir",
-        default="./reports",
-        help="Directory to save investigation reports (default: ./reports)",
+        default=SREConstants.app.default_output_dir,
+        help=f"Directory to save investigation reports (default: {SREConstants.app.default_output_dir})",
     )
     parser.add_argument(
         "--no-markdown",
@@ -760,7 +830,15 @@ async def main():
 
     args = parser.parse_args()
 
+    # Configure logging based on debug flag
+    debug_enabled = configure_logging(args.debug)
+
+    # Set environment variable so other modules can check debug status
+    os.environ["DEBUG"] = "true" if debug_enabled else "false"
+
     logger.info(f"Starting multi-agent system with provider: {args.provider}")
+    if debug_enabled:
+        logger.info("Debug logging enabled")
 
     try:
         # Interactive mode
@@ -796,7 +874,17 @@ async def main():
             spinner.start()
 
             try:
+                # Stream with timeout protection
+                timeout_seconds = SREConstants.timeouts.graph_execution_timeout_seconds
+                start_time = asyncio.get_event_loop().time()
+
                 async for event in graph.astream(initial_state):
+                    # Check for timeout
+                    elapsed = asyncio.get_event_loop().time() - start_time
+                    if elapsed > timeout_seconds:
+                        raise asyncio.TimeoutError(
+                            f"Graph execution exceeded {timeout_seconds} seconds"
+                        )
                     # Stop spinner when we get an event
                     if spinner:
                         spinner.stop()
@@ -813,19 +901,23 @@ async def main():
                                 plan_text = metadata.get("plan_text", "")
                                 if plan_text:
                                     print(f"\n📋 {plan_text}")
+                                    logger.info(f"📋 {plan_text}")
                             elif metadata.get("show_plan") and not metadata.get(
                                 "plan_shown"
                             ):
                                 plan_text = metadata.get("plan_text", "")
                                 if plan_text:
                                     print(f"\n📋 {plan_text}")
+                                    logger.info(f"📋 {plan_text}")
                                 # Mark plan as shown to avoid repetition
                                 metadata["plan_shown"] = True
 
                             if next_agent != "FINISH":
                                 print(f"🧭 Supervisor: Routing to {next_agent}")
+                                logger.info(f"🧭 Supervisor: Routing to {next_agent}")
                                 if reasoning:
                                     print(f"   Reasoning: {reasoning}")
+                                    logger.info(f"   Reasoning: {reasoning}")
                                 # Start spinner for next agent
                                 agent_display = next_agent.replace("_", " ").title()
                                 spinner = Spinner(f"🤖 {agent_display} thinking")
@@ -841,6 +933,7 @@ async def main():
                         ]:
                             agent_name = node_name.replace("_agent", "").title()
                             print(f"\n🔧 {agent_name} Agent:")
+                            logger.info(f"🔧 {agent_name} Agent:")
 
                             # Extract and display tool traces from metadata
                             metadata = node_output.get("metadata", {})
@@ -851,11 +944,12 @@ async def main():
                                     agent_messages = value
                                     break
 
-                            # Show debug info about trace messages found
-                            print(
-                                f"   🔍 DEBUG: agent_messages = {len(agent_messages) if agent_messages else 0}"
-                            )
-                            if agent_messages:
+                            # Show debug info about trace messages found (only in debug mode)
+                            if should_show_debug_traces():
+                                print(
+                                    f"   🔍 DEBUG: agent_messages = {len(agent_messages) if agent_messages else 0}"
+                                )
+                            if agent_messages and should_show_debug_traces():
                                 print(
                                     f"   📋 Found {len(agent_messages)} trace messages:"
                                 )
@@ -876,52 +970,66 @@ async def main():
                                         print(
                                             f"         Tool response for: {getattr(msg, 'tool_call_id', 'unknown')}"
                                         )
-                            else:
+                            elif should_show_debug_traces():
                                 print("   ⚠️  No trace messages found in metadata")
+                                logger.info("   ⚠️  No trace messages found in metadata")
 
-                            # Display tool calls and results like in langgraph_agent.py
-                            for msg in agent_messages:
-                                if hasattr(msg, "tool_calls") and msg.tool_calls:
-                                    print("   📞 Calling tools:")
-                                    for tc in msg.tool_calls:
-                                        tool_name = tc.get("name", "unknown")
-                                        tool_args = tc.get("args", {})
-                                        tool_id = tc.get("id", "unknown")
-                                        print(f"      {tool_name}(")
-                                        if tool_args:
-                                            for (
-                                                arg_name,
-                                                arg_value,
-                                            ) in tool_args.items():
-                                                # Show full values
-                                                value_str = repr(arg_value)
-                                                print(f"        {arg_name}={value_str}")
-                                        print(f"      ) [id: {tool_id}]")
+                            # Display tool calls and results like in langgraph_agent.py (only in debug mode)
+                            if should_show_debug_traces():
+                                for msg in agent_messages:
+                                    if hasattr(msg, "tool_calls") and msg.tool_calls:
+                                        print("   📞 Calling tools:")
+                                        logger.info("   📞 Calling tools:")
+                                        for tc in msg.tool_calls:
+                                            tool_name = tc.get("name", "unknown")
+                                            tool_args = tc.get("args", {})
+                                            tool_id = tc.get("id", "unknown")
+                                            print(f"      {tool_name}(")
+                                            logger.info(f"      {tool_name}(")
+                                            if tool_args:
+                                                for (
+                                                    arg_name,
+                                                    arg_value,
+                                                ) in tool_args.items():
+                                                    # Show full values
+                                                    value_str = repr(arg_value)
+                                                    print(
+                                                        f"        {arg_name}={value_str}"
+                                                    )
+                                                    logger.info(
+                                                        f"        {arg_name}={value_str}"
+                                                    )
+                                            print(f"      ) [id: {tool_id}]")
+                                            logger.info(f"      ) [id: {tool_id}]")
 
-                                elif hasattr(msg, "tool_call_id"):
-                                    # This is a tool response
-                                    tool_name = getattr(msg, "name", "unknown_tool")
-                                    tool_call_id = getattr(
-                                        msg, "tool_call_id", "unknown"
-                                    )
-                                    result_content = msg.content
+                                    elif hasattr(msg, "tool_call_id"):
+                                        # This is a tool response
+                                        tool_name = getattr(msg, "name", "unknown_tool")
+                                        tool_call_id = getattr(
+                                            msg, "tool_call_id", "unknown"
+                                        )
+                                        result_content = msg.content
 
-                                    print(f"   🛠️  {tool_name} [id: {tool_call_id}]:")
-                                    if isinstance(result_content, str):
-                                        try:
-                                            parsed_result = json.loads(result_content)
-                                            # Pretty print full output
-                                            formatted = json.dumps(
-                                                parsed_result, indent=2
-                                            )
-                                            lines = formatted.split("\n")
-                                            for line in lines:
-                                                print(f"      {line}")
-                                        except:
-                                            # Not JSON, print full string
-                                            lines = result_content.split("\n")
-                                            for line in lines:
-                                                print(f"      {line}")
+                                        print(
+                                            f"   🛠️  {tool_name} [id: {tool_call_id}]:"
+                                        )
+                                        if isinstance(result_content, str):
+                                            try:
+                                                parsed_result = json.loads(
+                                                    result_content
+                                                )
+                                                # Pretty print full output
+                                                formatted = json.dumps(
+                                                    parsed_result, indent=2
+                                                )
+                                                lines = formatted.split("\n")
+                                                for line in lines:
+                                                    print(f"      {line}")
+                                            except:
+                                                # Not JSON, print full string
+                                                lines = result_content.split("\n")
+                                                for line in lines:
+                                                    print(f"      {line}")
 
                             # Show agent's full final response
                             agent_results = node_output.get("agent_results", {})
@@ -933,12 +1041,15 @@ async def main():
                                 ):
                                     if result:
                                         print("   💡 Full Response:")
+                                        logger.info("   💡 Full Response:")
                                         print(f"      {result}")
+                                        logger.info(f"      {result}")
 
                         elif node_name == "aggregate":
                             final_response = node_output.get("final_response", "")
                             if final_response:
                                 print(f"\n💬 Final Response:\n{final_response}")
+                                logger.info(f"💬 Final Response: {final_response}")
                                 # Save final response to markdown file (auto-save in single query mode)
                                 if not args.no_markdown:
                                     _save_final_response_to_markdown(
@@ -946,6 +1057,16 @@ async def main():
                                         final_response,
                                         output_dir=args.output_dir,
                                     )
+            except asyncio.TimeoutError:
+                if spinner:
+                    spinner.stop()
+                print(
+                    "\n❌ Error: Investigation timed out after 10 minutes. The system may be stuck."
+                )
+                print(
+                    "💡 Tip: Try rephrasing your question or breaking it into smaller parts."
+                )
+                logger.error("Graph execution timed out after 600 seconds")
             finally:
                 # Always clean up spinner
                 if spinner:

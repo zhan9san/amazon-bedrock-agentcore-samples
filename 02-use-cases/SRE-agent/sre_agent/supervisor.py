@@ -11,7 +11,9 @@ from langchain_core.messages import HumanMessage, SystemMessage
 from pydantic import BaseModel, Field
 
 from .agent_state import AgentState
+from .constants import SREConstants
 from .output_formatter import create_formatter
+from .prompt_loader import prompt_loader
 
 # Configure logging with basicConfig
 logging.basicConfig(
@@ -20,12 +22,13 @@ logging.basicConfig(
     format="%(asctime)s,p%(process)s,{%(filename)s:%(lineno)d},%(levelname)s,%(message)s",
 )
 
-# Suppress MCP protocol logs
-mcp_loggers = ["streamable_http", "mcp.client.streamable_http", "httpx", "httpcore"]
-
-for logger_name in mcp_loggers:
-    mcp_logger = logging.getLogger(logger_name)
-    mcp_logger.setLevel(logging.WARNING)
+# Enable HTTP and MCP protocol logs for debugging
+# Comment out the following lines to suppress these logs if needed
+# mcp_loggers = ["streamable_http", "mcp.client.streamable_http", "httpx", "httpcore"]
+#
+# for logger_name in mcp_loggers:
+#     mcp_logger = logging.getLogger(logger_name)
+#     mcp_logger.setLevel(logging.WARNING)
 
 logger = logging.getLogger(__name__)
 
@@ -110,23 +113,25 @@ class SupervisorAgent:
         self.llm_provider = llm_provider
         self.llm = self._create_llm(**llm_kwargs)
         self.system_prompt = _read_supervisor_prompt()
-        self.formatter = create_formatter()
+        self.formatter = create_formatter(llm_provider=llm_provider)
 
     def _create_llm(self, **kwargs):
         """Create LLM instance based on provider."""
+        config = SREConstants.get_model_config(self.llm_provider, **kwargs)
+
         if self.llm_provider == "anthropic":
             return ChatAnthropic(
-                model=kwargs.get("model_id", "claude-sonnet-4-20250514"),
-                max_tokens=kwargs.get("max_tokens", 4096),
-                temperature=kwargs.get("temperature", 0.1),
+                model=config["model_id"],
+                max_tokens=config["max_tokens"],
+                temperature=config["temperature"],
             )
         elif self.llm_provider == "bedrock":
             return ChatBedrock(
-                model_id=kwargs.get("model_id", "us.amazon.nova-micro-v1:0"),
-                region_name=kwargs.get("region_name", "us-east-1"),
+                model_id=config["model_id"],
+                region_name=config["region_name"],
                 model_kwargs={
-                    "temperature": kwargs.get("temperature", 0.1),
-                    "max_tokens": kwargs.get("max_tokens", 4096),
+                    "temperature": config["temperature"],
+                    "max_tokens": config["max_tokens"],
                 },
             )
         else:
@@ -196,7 +201,10 @@ Return a structured plan."""
             # First time - create investigation plan
             plan = await self.create_investigation_plan(state)
 
-            if not plan.auto_execute:
+            # Check if we should auto-approve the plan (defaults to False if not set)
+            auto_approve = state.get("auto_approve_plan", False)
+
+            if not plan.auto_execute and not auto_approve:
                 # Complex plan - present to user for approval
                 plan_text = self._format_plan_markdown(plan)
                 return {
@@ -273,7 +281,7 @@ Return a structured plan."""
         # Check if this is a plan approval request
         if metadata.get("plan_pending_approval"):
             plan = metadata.get("investigation_plan", {})
-            query = state.get("current_query", "Investigation")
+            query = state.get("current_query", "Investigation") or "Investigation"
 
             # Use enhanced formatting for plan approval
             try:
@@ -305,7 +313,7 @@ You can:
             return {"final_response": "No agent responses to aggregate."}
 
         # Use enhanced formatting for investigation results
-        query = state.get("current_query", "Investigation")
+        query = state.get("current_query", "Investigation") or "Investigation"
         plan = metadata.get("investigation_plan")
 
         try:
@@ -319,48 +327,60 @@ You can:
             )
 
             # Fallback to LLM-based aggregation
-            if plan:
-                # Plan-based aggregation
-                current_step = metadata.get("plan_step", 0)
-                total_steps = len(plan.get("steps", []))
+            try:
+                # Get system message from prompt loader
+                system_prompt = prompt_loader.load_prompt(
+                    "supervisor_aggregation_system"
+                )
 
-                aggregation_prompt = f"""You are presenting results from a planned investigation.
+                # Determine if this is plan-based or standard aggregation
+                is_plan_based = plan is not None
 
-Original query: {state.get('current_query', 'No query provided')}
+                # Prepare template variables
+                query = (
+                    state.get("current_query", "No query provided")
+                    or "No query provided"
+                )
+                agent_results_json = json.dumps(agent_results, indent=2)
+                auto_approve_plan = state.get("auto_approve_plan", False) or False
 
-Investigation Plan Progress: Step {current_step + 1} of {total_steps}
-Plan: {json.dumps(plan.get('steps', []), indent=2)}
+                if is_plan_based:
+                    current_step = metadata.get("plan_step", 0)
+                    total_steps = len(plan.get("steps", []))
+                    plan_json = json.dumps(plan.get("steps", []), indent=2)
 
-Agent findings:
-{json.dumps(agent_results, indent=2)}
+                    aggregation_prompt = (
+                        prompt_loader.get_supervisor_aggregation_prompt(
+                            is_plan_based=True,
+                            query=query,
+                            agent_results=agent_results_json,
+                            auto_approve_plan=auto_approve_plan,
+                            current_step=current_step + 1,
+                            total_steps=total_steps,
+                            plan=plan_json,
+                        )
+                    )
+                else:
+                    aggregation_prompt = (
+                        prompt_loader.get_supervisor_aggregation_prompt(
+                            is_plan_based=False,
+                            query=query,
+                            agent_results=agent_results_json,
+                            auto_approve_plan=auto_approve_plan,
+                        )
+                    )
 
-Present the results clearly:
-1. **Current Status**: What we've completed so far
-2. **Key Findings**: Important discoveries from this investigation
-3. **Next Steps**: What happens next (if plan continues) or recommendations
-
-Keep it professional and focused on the investigation results."""
-            else:
-                # Standard aggregation
-                aggregation_prompt = f"""You are synthesizing findings from specialized agents.
-
-Original query: {state.get('current_query', 'No query provided')}
-
-Agent findings:
-{json.dumps(agent_results, indent=2)}
-
-Create a comprehensive response that:
-1. **Summarizes key findings** from the investigation
-2. **Highlights the most important insights** discovered
-3. **Provides actionable recommendations**
-
-Keep the response professional and focused."""
+            except Exception as e:
+                logger.error(f"Error loading aggregation prompts: {e}")
+                # Fallback to simple prompt
+                system_prompt = "You are an expert at presenting technical investigation results clearly and professionally."
+                aggregation_prompt = (
+                    f"Summarize these findings: {json.dumps(agent_results, indent=2)}"
+                )
 
             response = await self.llm.ainvoke(
                 [
-                    SystemMessage(
-                        content="You are an expert at presenting technical investigation results clearly and professionally."
-                    ),
+                    SystemMessage(content=system_prompt),
                     HumanMessage(content=aggregation_prompt),
                 ]
             )
