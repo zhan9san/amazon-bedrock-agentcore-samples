@@ -1,7 +1,7 @@
 # CrewAI and instrumentation
 crewai
 crewai-tools
-aws-opentelemetry-distro==0.10.0
+aws-opentelemetry-distro~=0.10.1
 duckduckgo-search
 boto3
 botocore
