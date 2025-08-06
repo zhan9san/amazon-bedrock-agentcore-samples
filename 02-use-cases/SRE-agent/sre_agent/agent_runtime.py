@@ -62,7 +62,7 @@ async def initialize_agent():
         provider = os.getenv("LLM_PROVIDER", "bedrock").lower()
 
         # Validate provider
-        if provider not in ["anthropic", "bedrock"]:
+        if provider not in ["anthropic", "bedrock", "openai"]:
             logger.warning(f"Invalid provider '{provider}', defaulting to 'bedrock'")
             provider = "bedrock"
 
@@ -262,7 +262,7 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="SRE Agent Runtime")
     parser.add_argument(
         "--provider",
-        choices=["anthropic", "bedrock"],
+        choices=["anthropic", "bedrock", "openai"],
         default=os.getenv("LLM_PROVIDER", "bedrock"),
         help="LLM provider to use (default: bedrock)",
     )

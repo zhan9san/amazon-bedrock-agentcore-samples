@@ -1,8 +1,14 @@
 #!/usr/bin/env python3
 
 import logging
+import os
+from pathlib import Path
 from typing import Optional
 from pydantic import BaseModel, Field
+from dotenv import load_dotenv
+
+# Load environment variables from .env file in sre_agent directory
+load_dotenv(Path(__file__).parent / ".env")
 
 # Configure logging with basicConfig
 logging.basicConfig(
@@ -21,6 +27,12 @@ class ModelConfig(BaseModel):
     anthropic_model_id: str = Field(
         default="claude-sonnet-4-20250514",
         description="Default Anthropic Claude model ID",
+    )
+
+    # OpenAI model IDs
+    openai_model_id: str = Field(
+        default="gpt-4o-mini",
+        description="Default OpenAI model ID",
     )
 
     # Amazon Bedrock model IDs
@@ -55,16 +67,19 @@ class ModelConfig(BaseModel):
 class AWSConfig(BaseModel):
     """AWS configuration constants."""
 
-    default_region: str = Field(default="us-east-1", description="Default AWS region")
+    default_region: str = Field(
+        default=os.getenv("AWS_DEFAULT_REGION", "us-east-1"),
+        description="Default AWS region (from AWS_DEFAULT_REGION env var, or us-east-1)"
+    )
 
     bedrock_endpoint_url: str = Field(
-        default="https://bedrock-agentcore-control.us-east-1.amazonaws.com",
-        description="Amazon Bedrock AgentCore control endpoint URL",
+        default=f"https://bedrock-agentcore-control.{os.getenv('AWS_DEFAULT_REGION', 'us-east-1')}.amazonaws.com",
+        description="Amazon Bedrock AgentCore control endpoint URL (region-specific)"
     )
 
     credential_provider_endpoint_url: str = Field(
-        default="https://us-east-1.prod.agent-credential-provider.cognito.aws.dev",
-        description="AWS credential provider endpoint URL",
+        default=f"https://{os.getenv('AWS_DEFAULT_REGION', 'us-east-1')}.prod.agent-credential-provider.cognito.aws.dev",
+        description="AWS credential provider endpoint URL (region-specific)"
     )
 
 
@@ -212,6 +227,12 @@ class SREConstants:
                 "max_tokens": kwargs.get("max_tokens", cls.model.default_max_tokens),
                 "temperature": kwargs.get("temperature", cls.model.default_temperature),
             }
+        elif provider == "openai":
+            return {
+                "model_id": kwargs.get("model_id", cls.model.openai_model_id),
+                "max_tokens": kwargs.get("max_tokens", cls.model.default_max_tokens),
+                "temperature": kwargs.get("temperature", cls.model.default_temperature),
+            }
         elif provider == "bedrock":
             return {
                 "model_id": kwargs.get("model_id", cls.model.bedrock_model_id),
@@ -256,6 +277,7 @@ constants = SREConstants()
 # Legacy support - individual constants for backward compatibility if needed
 ANTHROPIC_MODEL_ID = constants.model.anthropic_model_id
 BEDROCK_MODEL_ID = constants.model.bedrock_model_id
+OPENAI_MODEL_ID = constants.model.openai_model_id
 DEFAULT_TEMPERATURE = constants.model.default_temperature
 DEFAULT_MAX_TOKENS = constants.model.default_max_tokens
 DEFAULT_AWS_REGION = constants.aws.default_region

@@ -88,7 +88,7 @@ def _create_agent_runtime(
     runtime_name: str,
     container_uri: str,
     role_arn: str,
-    anthropic_api_key: str,
+    api_key: str,
     gateway_access_token: str,
     llm_provider: str = "bedrock",
     force_recreate: bool = False,
@@ -101,8 +101,10 @@ def _create_agent_runtime(
     }
 
     # Only add ANTHROPIC_API_KEY if it exists
-    if anthropic_api_key:
-        env_vars["ANTHROPIC_API_KEY"] = anthropic_api_key
+    if llm_provider == "anthropic":
+        env_vars["ANTHROPIC_API_KEY"] = api_key
+    elif llm_provider == "openai":
+        env_vars["OPENAI_API_KEY"] = api_key
 
     # Check for DEBUG environment variable
     debug_mode = os.getenv("DEBUG", "false")
@@ -113,7 +115,7 @@ def _create_agent_runtime(
     # Log environment variables being passed to AgentCore (mask sensitive data)
     logging.info("🚀 Environment variables being passed to AgentCore Runtime:")
     for key, value in env_vars.items():
-        if key in ["ANTHROPIC_API_KEY", "GATEWAY_ACCESS_TOKEN"]:
+        if key in ["ANTHROPIC_API_KEY", "OPENAI_API_KEY", "GATEWAY_ACCESS_TOKEN"]:
             masked_value = f"{'*' * 20}...{value[-8:] if len(value) > 8 else '***'}"
             logging.info(f"   {key}: {masked_value}")
         else:
@@ -232,20 +234,25 @@ def main():
         )
 
     # Get environment variables
-    anthropic_api_key = os.getenv("ANTHROPIC_API_KEY")
-    gateway_access_token = os.getenv("GATEWAY_ACCESS_TOKEN")
     llm_provider = os.getenv("LLM_PROVIDER", "bedrock")
+    if llm_provider == "anthropic":
+        api_key = os.getenv("ANTHROPIC_API_KEY")
+    elif llm_provider == "openai":
+        api_key = os.getenv("OPENAI_API_KEY")
+    else:
+        api_key = None
+    gateway_access_token = os.getenv("GATEWAY_ACCESS_TOKEN")
 
     # Log environment variable values (mask sensitive data)
     logging.info("📋 Environment variables loaded:")
     logging.info(f"   LLM_PROVIDER: {llm_provider}")
-    if anthropic_api_key:
+    if api_key:
         logging.info(
-            f"   ANTHROPIC_API_KEY: {'*' * 20}...{anthropic_api_key[-8:] if len(anthropic_api_key) > 8 else '***'}"
+            f"   API_KEY: {'*' * 20}...{api_key[-8:] if len(api_key) > 8 else '***'}"
         )
     else:
         logging.info(
-            "   ANTHROPIC_API_KEY: Not set - Amazon Bedrock will be used as the provider"
+            "   ANTHROPIC_API_KEY or OPENAI_API_KEY: Not set - Amazon Bedrock will be used as the provider"
         )
 
     if gateway_access_token:
@@ -264,7 +271,7 @@ def main():
         runtime_name=args.runtime_name,
         container_uri=args.container_uri,
         role_arn=args.role_arn,
-        anthropic_api_key=anthropic_api_key,
+        api_key=api_key,
         gateway_access_token=gateway_access_token,
         llm_provider=llm_provider,
         force_recreate=args.force_recreate,

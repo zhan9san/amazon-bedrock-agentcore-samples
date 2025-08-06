@@ -14,7 +14,7 @@ if [[ "$1" == "--help" ]] || [[ "$1" == "-h" ]]; then
     echo "  LOCAL_BUILD      Set to 'true' for local container build without ECR push"
     echo "  PLATFORM         Set to 'x86_64' to build for local testing (default: arm64 for AgentCore)"
     echo "  DEBUG            Set to 'true' to enable debug mode in deployed agent"
-    echo "  LLM_PROVIDER     Set to 'anthropic' or 'bedrock' (default: bedrock)"
+    echo "  LLM_PROVIDER     Set to 'anthropic', 'openai' or 'bedrock' (default: bedrock)"
     echo "  ANTHROPIC_API_KEY Required when using anthropic provider"
     echo ""
     echo "Examples:"
@@ -146,6 +146,8 @@ cd "$SCRIPT_DIR"
 # Create a temporary file to capture output
 TEMP_OUTPUT=$(mktemp)
 
+source "$SCRIPT_DIR/.env"
+
 # Log environment variables being passed
 echo "🔧 Environment variables for deployment:"
 echo "   DEBUG: ${DEBUG:-not set}"
@@ -160,8 +162,8 @@ fi
 cd "$PARENT_DIR"
 
 # Run the Python script and capture both return code and output
-# Pass through DEBUG, LLM_PROVIDER, and ANTHROPIC_API_KEY environment variables
-if DEBUG="$DEBUG" LLM_PROVIDER="${LLM_PROVIDER:-bedrock}" ANTHROPIC_API_KEY="$ANTHROPIC_API_KEY" uv run python deployment/deploy_agent_runtime.py \
+# Pass through DEBUG, LLM_PROVIDER, ANTHROPIC_API_KEY, and OPENAI_API_KEY environment variables
+if DEBUG="$DEBUG" LLM_PROVIDER="${LLM_PROVIDER:-bedrock}" ANTHROPIC_API_KEY="$ANTHROPIC_API_KEY" OPENAI_API_KEY="$OPENAI_API_KEY" uv run python deployment/deploy_agent_runtime.py \
     --container-uri "$ECR_REPO_URI:latest" \
     --role-arn "$ROLE_ARN" \
     --runtime-name "$RUNTIME_NAME" \

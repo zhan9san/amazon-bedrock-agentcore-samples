@@ -32,9 +32,6 @@ if not logging.getLogger().handlers:
 
 logger = logging.getLogger(__name__)
 
-# Load environment variables from .env file in sre_agent directory
-load_dotenv(Path(__file__).parent / ".env")
-
 
 class Spinner:
     """Simple spinner animation with elapsed time display."""
@@ -793,8 +790,8 @@ async def main():
     )
     parser.add_argument(
         "--provider",
-        choices=["bedrock", "anthropic"],
-        default="bedrock",
+        choices=["bedrock", "anthropic", "openai"],
+        default=os.environ.get("LLM_PROVIDER", "bedrock"),
         help="Model provider to use (default: bedrock)",
     )
     parser.add_argument(

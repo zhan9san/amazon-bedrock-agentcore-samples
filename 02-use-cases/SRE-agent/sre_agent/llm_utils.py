@@ -11,6 +11,7 @@ from typing import Optional, Dict, Any
 
 from langchain_anthropic import ChatAnthropic
 from langchain_aws import ChatBedrock
+from langchain_openai import ChatOpenAI
 
 from .constants import SREConstants
 
@@ -51,9 +52,9 @@ def create_llm_with_error_handling(provider: str = "bedrock", **kwargs):
         LLMAccessError: For access/permission failures
         ValueError: For unsupported providers
     """
-    if provider not in ["anthropic", "bedrock"]:
+    if provider not in ["anthropic", "bedrock", "openai"]:
         raise ValueError(
-            f"Unsupported provider: {provider}. Use 'anthropic' or 'bedrock'"
+            f"Unsupported provider: {provider}. Use 'anthropic' or 'bedrock' or 'openai'"
         )
 
     logger.info(f"Creating LLM with provider: {provider}")
@@ -64,6 +65,9 @@ def create_llm_with_error_handling(provider: str = "bedrock", **kwargs):
         if provider == "anthropic":
             logger.info(f"Creating Anthropic LLM - Model: {config['model_id']}")
             return _create_anthropic_llm(config)
+        elif provider == "openai":
+            logger.info(f"Creating OpenAI LLM - Model: {config['model_id']}")
+            return _create_openai_llm(config)
         else:  # bedrock
             logger.info(
                 f"Creating Bedrock LLM - Model: {config['model_id']}, Region: {config['region_name']}"
@@ -82,6 +86,14 @@ def create_llm_with_error_handling(provider: str = "bedrock", **kwargs):
         else:
             raise LLMProviderError(error_msg) from e
 
+
+def _create_openai_llm(config: Dict[str, Any]):
+    """Create OpenAI LLM instance."""
+    return ChatOpenAI(
+        model=config["model_id"],
+        max_tokens=config["max_tokens"],
+        temperature=config["temperature"],
+    )
 
 def _create_anthropic_llm(config: Dict[str, Any]):
     """Create Anthropic LLM instance."""
