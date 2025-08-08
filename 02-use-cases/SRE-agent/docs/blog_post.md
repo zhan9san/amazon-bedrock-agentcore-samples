@@ -24,72 +24,22 @@ The architecture demonstrates several key capabilities:
 
 The following diagram illustrates the solution architecture:
 
-```mermaid
-graph TB
-    subgraph "User Interface"
-        U["🧑‍💻 SRE Engineer"]
-        CLI["Command Line Interface"]
-        U -->|"Natural Language Query"| CLI
-    end
+![SRE Agent Architecture with AgentCore Components](./images/sre-agent-architecture.png)
 
-    subgraph "SRE Agent Core"
-        SUP["🧭 Supervisor Agent<br/>Orchestration & Routing"]
-        K8S["☸️ Kubernetes Agent<br/>Infrastructure Operations"]
-        LOG["📊 Logs Agent<br/>Log Analysis & Search"]
-        MET["📈 Metrics Agent<br/>Performance Monitoring"]
-        RUN["📖 Runbooks Agent<br/>Operational Procedures"]
-        
-        CLI -->|"Query"| SUP
-        SUP -->|"Route"| K8S
-        SUP -->|"Route"| LOG
-        SUP -->|"Route"| MET
-        SUP -->|"Route"| RUN
-    end
+The architecture demonstrates how the SRE Support Agent integrates seamlessly with Amazon Bedrock AgentCore components:
 
-    subgraph "AgentCore Gateway"
-        GW["🌉 AgentCore Gateway<br/>MCP Protocol Handler"]
-        AUTH["🔐 Authentication<br/>Token Management"]
-        HEALTH["❤️ Health Monitor<br/>Circuit Breaker"]
-        
-        subgraph "Infrastructure APIs"
-            DK8S["Kubernetes API<br/>:8011"]
-            DLOG["Logs API<br/>:8012"]
-            DMET["Metrics API<br/>:8013"]
-            DRUN["Runbooks API<br/>:8014"]
-        end
-        
-        K8S -.->|"MCP"| GW
-        LOG -.->|"MCP"| GW
-        MET -.->|"MCP"| GW
-        RUN -.->|"MCP"| GW
-        
-        GW --> AUTH
-        GW --> HEALTH
-        GW --> DK8S
-        GW --> DLOG
-        GW --> DMET
-        GW --> DRUN
-    end
-
-    subgraph "Amazon Bedrock"
-        CLAUDE["Claude 4 Sonnet<br/>Large Language Model"]
-        SUP -.->|"LLM Calls"| CLAUDE
-        K8S -.->|"LLM Calls"| CLAUDE
-        LOG -.->|"LLM Calls"| CLAUDE
-        MET -.->|"LLM Calls"| CLAUDE
-        RUN -.->|"LLM Calls"| CLAUDE
-    end
-
-    classDef agent fill:#e1f5fe,stroke:#01579b,stroke-width:2px
-    classDef gateway fill:#f3e5f5,stroke:#4a148c,stroke-width:2px
-    classDef api fill:#e8f5e9,stroke:#1b5e20,stroke-width:2px
-    classDef bedrock fill:#fff3e0,stroke:#e65100,stroke-width:2px
-    
-    class SUP,K8S,LOG,MET,RUN agent
-    class GW,AUTH,HEALTH gateway
-    class DK8S,DLOG,DMET,DRUN api
-    class CLAUDE bedrock
-```
+- **Customer Interface**: Receives alerts about degraded API response times and returns comprehensive agent responses
+- **AgentCore Runtime**: Manages the execution environment for the multi-agent SRE system
+- **SRE Support Agent**: Multi-agent collaboration system that processes incidents and orchestrates responses
+- **AgentCore Gateway**: Routes requests to specialized tools through OpenAPI interfaces:
+  - Tool 1: K8s API for getting cluster events
+  - Tool 2: Logs API for analyzing log patterns
+  - Tool 3: Metrics API for analyzing performance trends
+  - Tool 4: Runbooks API for searching operational procedures
+- **AgentCore Memory**: Stores and retrieves session context and previous interactions for continuity
+- **AgentCore Identity**: Handles authentication for tool access via Amazon Cognito integration
+- **AgentCore Observability**: Collects and visualizes agent traces for monitoring and debugging
+- **Amazon Bedrock LLMs**: Powers the agent intelligence through Claude models
 
 ### Architecture components
 
@@ -115,7 +65,58 @@ The system showcases the power of Amazon Bedrock AgentCore by utilizing multiple
 - **Ingress Authentication**: Secure access control for agents connecting to the Gateway
 - **Egress Authentication**: Manages authentication with backend servers, ensuring secure API access without hardcoding credentials
 
+**AgentCore Memory**: Transforms the SRE Agent from a stateless system into an intelligent, learning assistant that personalizes investigations based on user preferences and historical context. The memory system provides three distinct strategies:
+
+- **User Preferences Strategy** (`/sre/users/{user_id}/preferences`): Stores individual user preferences for investigation style, communication channels, escalation procedures, and report formatting. For example, Alice (Technical SRE) receives detailed systematic analysis with troubleshooting steps, while Carol (Executive/Director) receives business-focused summaries with impact analysis.
+
+- **Infrastructure Knowledge Strategy** (`/sre/infrastructure/{user_id}/{session_id}`): Accumulates domain expertise across investigations, allowing agents to learn from past discoveries. When the Kubernetes agent identifies a memory leak pattern, this knowledge becomes available for future investigations, enabling faster root cause identification.
+
+- **Investigation Memory Strategy** (`/sre/investigations/{user_id}/{session_id}`): Maintains historical context of past incidents and their resolutions. This enables the system to suggest proven remediation approaches and avoid anti-patterns that previously failed.
+
+The memory system demonstrates its value through personalized investigations. When both Alice and Carol investigate "API response times have degraded 3x in the last hour," they receive identical technical findings but completely different presentations:
+
+```python
+# Alice receives technical analysis
+memory_client.retrieve_user_preferences(user_id="Alice")
+# Returns: {"investigation_style": "detailed_systematic_analysis", 
+#          "reports": "technical_exposition_with_troubleshooting_steps"}
+
+# Carol receives executive summary  
+memory_client.retrieve_user_preferences(user_id="Carol")
+# Returns: {"investigation_style": "business_impact_focused",
+#          "reports": "executive_summary_without_technical_details"}
+```
+
 **AgentCore Runtime**: Provides the serverless execution environment for deploying agents at scale. The Runtime offers automatic scaling from zero to thousands of concurrent sessions while maintaining complete session isolation. Authentication and authorization to agents deployed on AgentCore Runtime is handled by AWS IAM - applications invoking the agent must have appropriate IAM permissions and trust policies. Learn more about [AgentCore security and IAM configuration](https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/security-iam.html).
+
+**AgentCore Observability**: Adding observability to an Agent deployed on the AgentCore Runtime is straightforward using the observability primitive. This enables comprehensive monitoring through Amazon CloudWatch with metrics, traces, and logs. Setting up observability requires three simple steps:
+
+First, add the OpenTelemetry packages to your `pyproject.toml`:
+```toml
+dependencies = [
+    # ... other dependencies ...
+    "opentelemetry-instrumentation-langchain",
+    "aws-opentelemetry-distro~=0.10.1",
+]
+```
+
+Second, configure observability for your agents following the [Amazon Bedrock AgentCore observability configuration guide](https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/observability-configure.html#observability-configure-builtin) to enable metrics in Amazon CloudWatch.
+
+Finally, start your container using the `opentelemetry-instrument` utility to automatically instrument your application:
+```dockerfile
+# Run application with OpenTelemetry instrumentation
+CMD ["uv", "run", "opentelemetry-instrument", "uvicorn", "sre_agent.agent_runtime:app", "--host", "0.0.0.0", "--port", "8080"]
+```
+
+Once deployed with observability enabled, you gain visibility into:
+- **LLM invocation metrics**: Token usage, latency, and model performance across all agents
+- **Tool execution traces**: Duration and success rates for each MCP tool call
+- **Memory operations**: Retrieval patterns and storage efficiency
+- **End-to-end request tracing**: Complete request flow from user query to final response
+
+![Agent Metrics Dashboard](./images/agent-metrics.gif)
+
+The observability primitive automatically captures these metrics without additional code changes, providing production-grade monitoring capabilities out of the box.
 
 **Foundation Models**: The system supports two providers for the Claude language models:
 - **Amazon Bedrock**: Claude 3.7 Sonnet (us.anthropic.claude-3-7-sonnet-20250219-v1:0) for AWS-integrated deployments
@@ -179,17 +180,18 @@ To implement this solution, you need the following:
 
 ## Implementation walkthrough
 
-In this section, we focus on how AgentCore Gateway and Runtime help us build this multi-agent collaboration system and deploy it end-to-end with MCP support to communicate with backend systems. The step-by-step guidance to run this solution is found in the README and other documentation - here we provide a bullet point overview of what those steps entail:
+In this section, we focus on how AgentCore Gateway, Memory, and Runtime work together to build this multi-agent collaboration system and deploy it end-to-end with MCP support and persistent intelligence. The step-by-step guidance to run this solution is found in the README and other documentation - here we provide a bullet point overview of what those steps entail:
 
 - **Clone and setup**: Repository cloning, virtual environment creation, and dependency installation
 - **Environment configuration**: Setting up API keys, LLM providers, and deployment configurations  
 - **Backend APIs deployment**: Starting demo infrastructure APIs with SSL certificates
 - **AgentCore Gateway setup**: Creating the gateway, identity providers, and MCP tool access
-- **Agent configuration**: Defining agent-to-tool mappings and system behavior
-- **Multi-agent system initialization**: Setting up LangGraph workflow and agent coordination
-- **Testing and validation**: Running CLI tests and validating end-to-end functionality
+- **AgentCore Memory initialization**: Creating memory strategies and loading user personas for personalized investigations
+- **Agent configuration**: Defining agent-to-tool mappings, memory integration, and system behavior
+- **Multi-agent system initialization**: Setting up LangGraph workflow with memory-enabled agent coordination
+- **Testing and validation**: Running CLI tests with user personas and validating personalized functionality
 - **Containerization**: Building ARM64 Docker images for AgentCore Runtime compatibility
-- **Production deployment**: Deploying containers to AgentCore Runtime with proper IAM configuration
+- **Production deployment**: Deploying containers to AgentCore Runtime with proper IAM configuration and memory persistence
 
 Detailed instructions for each step are provided in the repository:
 - [Use Case Setup Guide](https://github.com/awslabs/amazon-bedrock-agentcore-samples/tree/feature/issue-143-deploy-sre-agent-agentcore-runtime/02-use-cases/SRE-agent#use-case-setup) - Backend deployment and development setup
@@ -329,6 +331,114 @@ The advantage of this approach is that existing APIs require no modification—o
 
 This means you can take any existing infrastructure API (Kubernetes, monitoring, logging, documentation) and instantly make it available to any AI agent framework that supports MCP—all through a single, secure, standardized interface.
 
+### Implementing Persistent Intelligence with AgentCore Memory
+
+While AgentCore Gateway provides seamless API access, AgentCore Memory transforms the SRE Agent from a stateless system into an intelligent, learning assistant. The memory implementation demonstrates how a few lines of code can enable sophisticated personalization and cross-session knowledge retention.
+
+#### Step 1: Initialize Memory Strategies
+
+The SRE Agent memory system is built on Amazon Bedrock AgentCore Memory's event-based model with automatic namespace routing. During initialization, the system creates three memory strategies with specific namespace patterns:
+
+```python
+from sre_agent.memory.client import SREMemoryClient
+from sre_agent.memory.strategies import create_memory_strategies
+
+# Initialize memory client
+memory_client = SREMemoryClient(
+    memory_name="sre_agent_memory", 
+    region="us-east-1"
+)
+
+# Create three specialized memory strategies
+strategies = create_memory_strategies()
+for strategy in strategies:
+    memory_client.create_strategy(strategy)
+```
+
+The three strategies each serve distinct purposes:
+- **User Preferences**: `/sre/users/{user_id}/preferences` - Individual investigation styles and communication preferences
+- **Infrastructure Knowledge**: `/sre/infrastructure/{user_id}/{session_id}` - Domain expertise accumulated across investigations
+- **Investigation Summaries**: `/sre/investigations/{user_id}/{session_id}` - Historical incident patterns and resolutions
+
+#### Step 2: Load User Personas and Preferences
+
+The system comes pre-configured with user personas that demonstrate personalized investigations. The [manage_memories.py](https://github.com/awslabs/amazon-bedrock-agentcore-samples/blob/feature/issue-143-deploy-sre-agent-agentcore-runtime/02-use-cases/SRE-agent/scripts/manage_memories.py) script loads these personas:
+
+```python
+# Load Alice - Technical SRE Engineer
+alice_preferences = {
+    "investigation_style": "detailed_systematic_analysis",
+    "communication": ["#alice-alerts", "#sre-team"],
+    "escalation": {"contact": "alice.manager@company.com", "threshold": "15min"},
+    "reports": "technical_exposition_with_troubleshooting_steps",
+    "timezone": "UTC"
+}
+
+# Load Carol - Executive/Director
+carol_preferences = {
+    "investigation_style": "business_impact_focused", 
+    "communication": ["#carol-executive", "#strategic-alerts"],
+    "escalation": {"contact": "carol.director@company.com", "threshold": "5min"},
+    "reports": "executive_summary_without_technical_details",
+    "timezone": "EST"
+}
+
+# Store preferences using memory client
+memory_client.store_user_preference("Alice", alice_preferences)
+memory_client.store_user_preference("Carol", carol_preferences)
+```
+
+#### Step 3: Automatic Namespace Routing in Action
+
+The power of AgentCore Memory lies in its automatic namespace routing. When the SRE Agent creates events, it only needs to provide the `actor_id`—Amazon Bedrock AgentCore Memory automatically determines which namespace(s) the event belongs to:
+
+```python
+# During investigation, the supervisor agent stores context
+memory_client.create_event(
+    memory_id="sre_agent_memory-abc123",
+    actor_id="Alice",  # AgentCore Memory routes this automatically
+    session_id="investigation_2025_01_15", 
+    messages=[("investigation_started", "USER")]
+)
+
+# Memory system automatically:
+# 1. Checks all strategy namespaces
+# 2. Matches actor_id "Alice" to /sre/users/Alice/preferences
+# 3. Stores event in User Preferences Strategy
+# 4. Makes event available for future retrievals
+```
+
+#### Result: Personalized Investigation Experience
+
+The memory system's impact becomes clear when both Alice and Carol investigate the same issue. Using identical technical findings, the system produces completely different presentations:
+
+**Alice's Technical Report** (detailed systematic analysis):
+```markdown
+## Technical Investigation Summary
+**Root Cause**: Payment processor memory leak causing OOM kills
+**Analysis**:
+- Pod restart frequency increased 300% at 14:23 UTC
+- Memory utilization peaked at 8.2GB (80% of container limit)  
+- JVM garbage collection latency spiked to 2.3s
+**Next Steps**:
+1. Implement heap dump analysis (kubectl exec payment-pod -- jmap)
+2. Review recent code deployments for memory management changes
+3. Consider increasing memory limits and implementing graceful shutdown
+```
+
+**Carol's Executive Summary** (business impact focused):
+```markdown
+## Business Impact Assessment  
+**Status**: CRITICAL - Customer payment processing degraded
+**Impact**: 23% transaction failure rate, $47K revenue at risk
+**Timeline**: Issue detected 14:23 UTC, resolution ETA 45 minutes
+**Business Actions**:
+- Customer communication initiated via status page
+- Finance team alerted for revenue impact tracking  
+- Escalating to VP Engineering if not resolved by 15:15 UTC
+```
+
+The memory system enables this personalization while continuously learning from each investigation, building organizational knowledge that improves incident response over time.
 
 ### Deploying to production with Amazon Bedrock AgentCore Runtime
 
@@ -344,22 +454,26 @@ FROM --platform=linux/arm64 ghcr.io/astral-sh/uv:python3.12-bookworm-slim
 
 WORKDIR /app
 
-# Copy and install dependencies
+# Copy uv files
 COPY pyproject.toml uv.lock ./
+
+# Install dependencies
 RUN uv sync --frozen --no-dev
 
 # Copy SRE agent module
 COPY sre_agent/ ./sre_agent/
 
 # Set environment variables
+# Note: Set DEBUG=true to enable debug logging and traces
 ENV PYTHONPATH="/app" \
     PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1
 
+# Expose port
 EXPOSE 8080
 
-# Run application
-CMD ["uv", "run", "uvicorn", "sre_agent.agent_runtime:app", "--host", "0.0.0.0", "--port", "8080"]
+# Run application with OpenTelemetry instrumentation
+CMD ["uv", "run", "opentelemetry-instrument", "uvicorn", "sre_agent.agent_runtime:app", "--host", "0.0.0.0", "--port", "8080"]
 ```
 
 The key insight: any existing agent just needs a FastAPI wrapper (`agent_runtime:app`) to become AgentCore-compatible.
@@ -406,13 +520,27 @@ Calling your deployed agent is just as simple with [invoke_agent_runtime.py](htt
 ```python
 import boto3
 import json
+from botocore.config import Config
 
-# Create AgentCore client
-agent_core_client = boto3.client('bedrock-agentcore', region_name=region)
+# Create AgentCore client with custom timeout for long-running operations
+config = Config(
+    read_timeout=300,  # 5 minutes read timeout (default is 60 seconds)
+    retries={'max_attempts': 3, 'mode': 'adaptive'}
+)
 
-# Prepare your query
+agent_core_client = boto3.client(
+    'bedrock-agentcore', 
+    region_name=region,
+    config=config
+)
+
+# Prepare your query with user_id and session_id for memory personalization
 payload = json.dumps({
-    "input": {"prompt": "API response times have degraded 3x in the last hour"}
+    "input": {
+        "prompt": "API response times have degraded 3x in the last hour",
+        "user_id": "Alice",  # User for personalized investigation
+        "session_id": "investigation-20250127-123456"  # Session for context
+    }
 })
 
 # Invoke the deployed agent
@@ -425,7 +553,7 @@ response = agent_core_client.invoke_agent_runtime(
 
 # Get the response
 response_data = json.loads(response['response'].read())
-print(response_data["output"]["message"])
+print(response_data)  # Full response includes output with agent's investigation
 ```
 
 #### Key benefits of AgentCore Runtime
@@ -535,26 +663,9 @@ The system aggregates these findings into an executive summary with clear next s
 3. **Long-term** (< 1 week): Implement circuit breaker patterns to prevent cascade failures, scale web-service resources to handle memory demands
 4. **Follow-up**: Monitor database connectivity patterns and establish alerts for ConfigMap availability and memory utilization thresholds
 
-### Real-time agent execution traces
+The SRE Agent demonstrates real-time collaboration between agents, with the supervisor intelligently routing work to specialists based on the investigation plan. The system automatically scales from identifying performance metrics to correlating with error rates and resource utilization.
 
-The agent.log file shows the detailed execution flow during this investigation:
-
-```
-2025-07-27 01:05:07,085 - Starting multi-agent system with provider: anthropic
-2025-07-27 01:05:07,326 - Retrieved 21 tools from MCP
-2025-07-27 01:05:11,735 - Created investigation plan: 3 steps, complexity: simple
-2025-07-27 01:05:11,736 - Supervisor: Routing to metrics
-2025-07-27 01:05:14,064 - Performance Metrics Agent - Agent making 1 tool calls
-2025-07-27 01:05:14,064 - Tool call: metrics-api___get_performance_metrics
-2025-07-27 01:05:16,655 - Tool call: metrics-api___analyze_trends
-2025-07-27 01:05:26,196 - Tool call: metrics-api___get_error_rates
-2025-07-27 01:05:29,165 - Tool call: metrics-api___get_resource_metrics (cpu)
-2025-07-27 01:05:31,587 - Tool call: metrics-api___get_resource_metrics (memory)
-```
-
-This shows the real-time collaboration between agents, with the supervisor intelligently routing work to specialists based on the investigation plan. The system automatically scaled from identifying performance metrics to correlating with error rates and resource utilization.
-
-This investigation demonstrates several key capabilities:
+This investigation showcases several key capabilities:
 - **Multi-source correlation**: Connecting database configuration issues to API performance degradation
 - **Real-time streaming**: Agents work in parallel while providing live updates
 - **Source attribution**: Every finding includes the specific tool and data source
@@ -600,23 +711,21 @@ Replace the demo APIs with connections to your actual systems:
 
 ## Clean up
 
-To avoid incurring future charges, complete the following steps to clean up your resources:
+To avoid incurring future charges, use the comprehensive cleanup script to remove all AWS resources:
 
 ```bash
-# Stop all demo servers
-cd backend
-./scripts/stop_demo_backend.sh
-cd ..
-
-# Remove virtual environment
-deactivate
-rm -rf .venv
-
-# Clean up generated files
-rm -rf reports/
-rm -rf gateway/.gateway_uri gateway/.access_token
-rm -rf sre_agent/.env
+# Complete cleanup - deletes AWS resources and local files
+./scripts/cleanup.sh
 ```
+
+This script will automatically:
+- Stop all backend servers
+- Delete the AgentCore Gateway and all its targets
+- Delete AgentCore Memory resources
+- Delete the AgentCore Runtime
+- Remove generated files (gateway URIs, tokens, agent ARNs, memory IDs)
+
+The cleanup script ensures complete removal of all billable AWS resources created during the demo.
 
 ## Conclusion
 
