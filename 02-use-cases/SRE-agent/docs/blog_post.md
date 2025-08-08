@@ -194,8 +194,8 @@ In this section, we focus on how AgentCore Gateway, Memory, and Runtime work tog
 - **Production deployment**: Deploying containers to AgentCore Runtime with proper IAM configuration and memory persistence
 
 Detailed instructions for each step are provided in the repository:
-- [Use Case Setup Guide](https://github.com/awslabs/amazon-bedrock-agentcore-samples/tree/feature/issue-143-deploy-sre-agent-agentcore-runtime/02-use-cases/SRE-agent#use-case-setup) - Backend deployment and development setup
-- [Deployment Guide](https://github.com/awslabs/amazon-bedrock-agentcore-samples/blob/feature/issue-143-deploy-sre-agent-agentcore-runtime/02-use-cases/SRE-agent/docs/deployment-guide.md) - Production containerization and AgentCore Runtime deployment
+- [Use Case Setup Guide](https://github.com/awslabs/amazon-bedrock-agentcore-samples/tree/main/02-use-cases/SRE-agent#use-case-setup) - Backend deployment and development setup
+- [Deployment Guide](https://github.com/awslabs/amazon-bedrock-agentcore-samples/tree/main/02-use-cases/SRE-agent/docs/deployment-guide.md) - Production containerization and AgentCore Runtime deployment
 
 ### Converting APIs to MCP Tools with AgentCore Gateway
 
@@ -203,7 +203,7 @@ Amazon Bedrock AgentCore Gateway demonstrates the power of protocol standardizat
 
 #### Step 1: Upload OpenAPI specifications
 
-The gateway process begins by uploading your existing API specifications to S3. The [create_gateway.sh](https://github.com/awslabs/amazon-bedrock-agentcore-samples/blob/feature/issue-143-deploy-sre-agent-agentcore-runtime/02-use-cases/SRE-agent/gateway/create_gateway.sh) script automatically handles uploading the four API specifications (Kubernetes, Logs, Metrics, and Runbooks) to your configured S3 bucket with proper metadata and content types.
+The gateway process begins by uploading your existing API specifications to Amazon S3. The [create_gateway.sh](https://github.com/awslabs/amazon-bedrock-agentcore-samples/blob/feature/issue-143-deploy-sre-agent-agentcore-runtime/02-use-cases/SRE-agent/gateway/create_gateway.sh) script automatically handles uploading the four API specifications (Kubernetes, Logs, Metrics, and Runbooks) to your configured S3 bucket with proper metadata and content types. These specifications will be used to create API Endpoint Targets in the gateway.
 
 #### Step 2: Create identity provider and gateway
 
@@ -244,21 +244,21 @@ def create_gateway(
     return response
 ```
 
-#### Step 3: Deploy S3 targets with credential providers
+#### Step 3: Deploy API Endpoint Targets with credential providers
 
 Each API becomes an MCP target through the gateway. The system automatically handles credential management:
 
 ```python
-def create_s3_target(
+def create_api_endpoint_target(
     client: Any,
     gateway_id: str,
     s3_uri: str,
     provider_arn: str,
     target_name_prefix: str = "open",
-    description: str = "S3 target for OpenAPI schema",
+    description: str = "API Endpoint Target for OpenAPI schema",
 ) -> Dict[str, Any]:
     
-    s3_target_config = {"mcp": {"openApiSchema": {"s3": {"uri": s3_uri}}}}
+    api_target_config = {"mcp": {"openApiSchema": {"s3": {"uri": s3_uri}}}}
 
     # API key credential provider configuration
     credential_config = {
@@ -276,7 +276,7 @@ def create_s3_target(
         gatewayIdentifier=gateway_id,
         name=target_name_prefix,
         description=description,
-        targetConfiguration=s3_target_config,
+        targetConfiguration=api_target_config,
         credentialProviderConfigurations=[credential_config],
     )
     return response
@@ -476,7 +476,7 @@ EXPOSE 8080
 CMD ["uv", "run", "opentelemetry-instrument", "uvicorn", "sre_agent.agent_runtime:app", "--host", "0.0.0.0", "--port", "8080"]
 ```
 
-The key insight: any existing agent just needs a FastAPI wrapper (`agent_runtime:app`) to become AgentCore-compatible.
+The key insight: any existing agent just needs a FastAPI wrapper (`agent_runtime:app`) to become AgentCore-compatible, and we add `opentelemetry-instrument` for enabling observability through AgentCore.
 
 #### Step 2: Deploy to AgentCore Runtime
 
@@ -518,22 +518,6 @@ That's it! AgentCore handles all the infrastructure, scaling, and session manage
 Calling your deployed agent is just as simple with [invoke_agent_runtime.py](https://github.com/awslabs/amazon-bedrock-agentcore-samples/blob/feature/issue-143-deploy-sre-agent-agentcore-runtime/02-use-cases/SRE-agent/deployment/invoke_agent_runtime.py):
 
 ```python
-import boto3
-import json
-from botocore.config import Config
-
-# Create AgentCore client with custom timeout for long-running operations
-config = Config(
-    read_timeout=300,  # 5 minutes read timeout (default is 60 seconds)
-    retries={'max_attempts': 3, 'mode': 'adaptive'}
-)
-
-agent_core_client = boto3.client(
-    'bedrock-agentcore', 
-    region_name=region,
-    config=config
-)
-
 # Prepare your query with user_id and session_id for memory personalization
 payload = json.dumps({
     "input": {
@@ -572,102 +556,66 @@ Let's explore how the SRE Agent handles common incident response scenarios with 
 
 ### Investigating API performance degradation
 
-When facing a production issue, you can query the system in natural language:
+When facing a production issue, you can query the system in natural language. The system uses AgentCore Memory to personalize the investigation based on your role and preferences:
 
 ```bash
+export USER_ID=Alice
 sre-agent --prompt "API response times have degraded 3x in the last hour"
 ```
 
-The supervisor analyzes the query and creates an investigation plan:
+The supervisor retrieves Alice's preferences from memory (detailed systematic analysis style) and creates an investigation plan tailored to her role as a Technical SRE:
 
 ```
-📋 Investigation Plan:
-1. Check current performance metrics and response time trends to quantify the degradation
-2. Analyze application logs for errors or warnings that correlate with the performance drop
-3. Review resource utilization metrics to identify potential bottlenecks
-
-Complexity: Simple - Auto-executing investigation...
+📋 ## 🔍 Investigation Plan
+**1.** Use metrics_agent to analyze API performance metrics including response times, error rates, and resource utilization to identify the extent and pattern of slowdown
+**2.** Use logs_agent to examine application logs for errors related to slow API responses, focusing on database connection issues and memory errors
+**3.** Use kubernetes_agent to check pod status and resource constraints, especially for web-service and database pods, looking for CrashLoopBackOff states and missing ConfigMaps
+**📊 Complexity:** Simple
+**🤖 Auto-execute:** Yes
+**👥 Agents involved:** Metrics Agent, Logs Agent, Kubernetes Agent
 ```
 
-**Performance Metrics Agent Response:**
+The agents investigate sequentially according to the plan, each contributing their specialized analysis. The system then aggregates these findings into a comprehensive executive summary:
+
 ```
-## Performance Metrics Analysis Summary
+## 📋 Executive Summary
+### 🎯 Key Insights
+- **Root Cause**: Database service failure due to missing ConfigMap 'database-config' in production namespace, causing database pod to crash repeatedly
+- **Impact**: Severe performance degradation with API response times increased from 150ms to 5000ms (33x slower)
+- **Severity**: High - Database unavailability, memory exhaustion (100%), and CPU saturation (95%) causing 75% error rate
 
-Based on my investigation, I've identified a **critical performance degradation** affecting your API response times:
+### ⚡ Next Steps
+1. **Immediate** (< 1 hour): Create/update ConfigMap 'database-config' in production namespace and restart database pod
+2. **Short-term** (< 24 hours): 
+   - Fix permissions on '/var/lib/postgresql/data' directory
+   - Increase Java heap space for web-service to address OutOfMemoryErrors
+   - Optimize UserService.loadAllUsers method causing memory issues
+3. **Long-term** (< 1 week): 
+   - Implement resource monitoring with alerts for CPU (>80%), memory (>90%)
+   - Optimize slow database queries, particularly "SELECT * FROM users WHERE status='active'"
+   - Scale up resources or implement autoscaling for web-service
 
-### Response Time Degradation (source: get_performance_metrics)
-- **web-service /api/users endpoint**: Response times increased from 150ms to 5000ms over 4 minutes
-- **Degradation factor**: 33x increase (150ms → 5000ms), significantly exceeding the reported 3x degradation
-- **Timeline**: Degradation started at 14:21:00Z and rapidly escalated
-- **Sample count decline**: Requests dropped from 100 to 20 samples, indicating service degradation
+### 🚨 Critical Alerts
+- Database pod (database-pod-7b9c4d8f2a-x5m1q) in CrashLoopBackOff state
+- Web-service experiencing OutOfMemoryErrors in UserService.loadAllUsers(UserService.java:45)
+- Node-3 experiencing memory pressure (>85% usage)
+- Web-app-deployment showing readiness probe failures with 503 errors
 
-### Error Rate Correlation (source: get_error_rates)
-- **web-service error rates**: Escalated from 0.5% to 75% during the same timeframe
-- **Error pattern**: Predominantly server errors (500: 120, 503: 28 at 14:24:00Z)
-- **Request volume**: Dropped from 1000 to 200 requests as performance degraded
-
-### Resource Utilization Critical Issues (source: get_resource_metrics)
-- **CPU usage**: Escalation from 25% to 95% on web-service
-- **Memory usage**: Reached 100% utilization (1024MB) at 14:24:00Z
-- **Resource exhaustion**: Both CPU and memory at critical levels
-
-### Root Cause Analysis
-The primary issue appears to be **database connectivity problems**:
-- **database service**: 100% error rate with "ConfigMap not found" and "Permission denied on data directory" failures
-- **Connection refused errors**: 1440+ connection attempts failing consistently
-```
-
-**Application Logs Agent Response:**
-```
-## Log Analysis Summary
-
-Based on my analysis of the application logs, I've identified the root causes:
-
-### Primary Issues Identified
-
-#### 1. Database Connectivity Failures (source: get_error_logs)
-- **Configuration Issues**: 'FATAL: could not open configuration file '/etc/postgresql/database.conf': No such file or directory' at 2024-01-15T14:22:30.123Z
-- **Permission Problems**: 'FATAL: data directory '/var/lib/postgresql/data' has invalid permissions' at 2024-01-15T14:23:00.789Z
-- **Missing ConfigMap**: 'ERROR: ConfigMap 'database-config' not found in namespace 'production'' at 2024-01-15T14:23:30.012Z
-
-#### 2. Connection Timeout Pattern (source: analyze_log_patterns)
-- **Pattern**: "Database connection timeout" occurring 15 times between 14:23:46.567Z and 14:24:30.789Z
-- **Specific Error**: 'Database connection timeout after 5000ms' affecting /api/users endpoints
-
-#### 3. Memory Exhaustion (source: analyze_log_patterns)
-- **Critical Pattern**: "OutOfMemoryError" occurring 8 times starting at 14:24:30.789Z
-- **Heap Space Issue**: 'java.lang.OutOfMemoryError: Java heap space at com.example.UserService.loadAllUsers(UserService.java:45)'
-- **Application Shutdown**: 'Application shutting down due to critical error' at 2024-01-15T14:25:11.456Z
-
-### Timeline of Events
-1. **14:22:15Z**: Slow queries begin appearing (1250ms duration)
-2. **14:22:30Z**: Database configuration file missing
-3. **14:23:00Z**: Database permission errors and health check failures
-4. **14:23:46Z**: Connection timeouts start (5000ms timeout threshold)
-5. **14:24:30Z**: OutOfMemoryError begins occurring
-6. **14:25:11Z**: Web service shuts down due to critical errors
+### 🔍 Troubleshooting Steps
+1. Verify ConfigMap status: `kubectl get configmap database-config -n production`
+2. Check database pod logs: `kubectl logs database-pod-7b9c4d8f2a-x5m1q -n production`
+3. Create/update ConfigMap: `kubectl create configmap database-config --from-file=database.conf -n production`
+4. Fix data directory permissions: `kubectl exec database-pod-7b9c4d8f2a-x5m1q -n production -- chmod -R 700 /var/lib/postgresql/data`
+5. Restart database pod: `kubectl delete pod database-pod-7b9c4d8f2a-x5m1q -n production`
 ```
 
-The system aggregates these findings into an executive summary with clear next steps:
+This investigation demonstrates all AgentCore primitives working together: **AgentCore Gateway** provides secure access to infrastructure APIs through MCP tools, **AgentCore Identity** handles ingress and egress authentication, **AgentCore Runtime** hosts the multi-agent system with automatic scaling, **AgentCore Memory** personalizes Alice's experience and stores investigation knowledge for future incidents, and **AgentCore Observability** captures detailed metrics and traces in Amazon CloudWatch for monitoring and debugging.
 
-**📋 Executive Summary**
-
-**🎯 Key Insights**
-- **Root Cause**: Database service failure due to missing ConfigMap 'database-config' and invalid data directory permissions, causing cascading failures across dependent services
-- **Impact**: Service instability with severe performance degradation - API response times increased 33x (150ms → 5000ms) with 75% error rates and memory exhaustion leading to web-service shutdown
-- **Severity**: **Critical** - Complete database unavailability, web-service terminated, and authentication systems non-functional
-
-**⚡ Next Steps**
-1. **Immediate** (< 1 hour): Restore database ConfigMap 'database-config' in production namespace and fix data directory permissions at '/var/lib/postgresql/data'
-2. **Short-term** (< 24 hours): Restart web-service pods after database recovery, investigate UserService.loadAllUsers method causing heap exhaustion
-3. **Long-term** (< 1 week): Implement circuit breaker patterns to prevent cascade failures, scale web-service resources to handle memory demands
-4. **Follow-up**: Monitor database connectivity patterns and establish alerts for ConfigMap availability and memory utilization thresholds
-
-The SRE Agent demonstrates real-time collaboration between agents, with the supervisor intelligently routing work to specialists based on the investigation plan. The system automatically scales from identifying performance metrics to correlating with error rates and resource utilization.
+The SRE Agent demonstrates intelligent agent orchestration, with the supervisor routing work to specialists based on the investigation plan. The system's memory capabilities ensure that each investigation builds organizational knowledge and provides personalized experiences based on user roles and preferences.
 
 This investigation showcases several key capabilities:
 - **Multi-source correlation**: Connecting database configuration issues to API performance degradation
-- **Real-time streaming**: Agents work in parallel while providing live updates
+- **Sequential investigation**: Agents work systematically through the investigation plan while providing live updates
 - **Source attribution**: Every finding includes the specific tool and data source
 - **Actionable insights**: Clear timeline of events and prioritized recovery steps
 - **Cascading failure detection**: Understanding how one failure propagates through the system
@@ -729,20 +677,18 @@ The cleanup script ensures complete removal of all billable AWS resources create
 
 ## Conclusion
 
-The future of site reliability engineering lies not in replacing human expertise, but in augmenting it with AI that can rapidly synthesize information across complex distributed systems. The SRE Agent demonstrates how multi-agent systems can transform incident response from a manual, time-intensive process into an intelligent, collaborative investigation that provides SREs with the insights they need to resolve issues quickly and confidently.
+The SRE Agent demonstrates how multi-agent systems can transform incident response from a manual, time-intensive process into an intelligent, collaborative investigation that provides SREs with the insights they need to resolve issues quickly and confidently.
 
-By combining Amazon Bedrock AgentCore's enterprise-grade infrastructure with the Model Context Protocol's standardized tool access, we've created a foundation that can adapt as your infrastructure evolves and new capabilities emerge. AWS's comprehensive AI and machine learning services, from foundation models to serverless computing, provide the scalable, secure foundation that enterprises need for production AI deployments.
-
-The system's modular architecture ensures that you can start with basic functionality and expand to address your organization's specific operational challenges while leveraging AWS's proven track record in mission-critical infrastructure. Whether you're dealing with midnight production incidents, conducting proactive health checks, or training new team members, AI-powered SRE assistance can help your team maintain reliable, high-performing systems while reducing the stress and toil that traditionally comes with operations work.
+By combining Amazon Bedrock AgentCore's enterprise-grade infrastructure with the Model Context Protocol's standardized tool access, we've created a foundation that can adapt as your infrastructure evolves and new capabilities emerge. 
 
 The complete implementation is available in our GitHub repository, including demo environments, configuration guides, and extension examples. We encourage you to explore the system, customize it for your infrastructure, and share your experiences with the community.
 
 To get started building your own SRE assistant, refer to the following resources:
 
 * [Amazon Bedrock AgentCore documentation](https://docs.aws.amazon.com/bedrock/latest/userguide/agents.html)
+* [SRE Agent GitHub repository](https://github.com/awslabs/amazon-bedrock-agentcore-samples)
 * [Model Context Protocol specification](https://modelcontextprotocol.io)
 * [LangGraph framework documentation](https://langchain-ai.github.io/langgraph/)
-* [SRE Agent GitHub repository](https://github.com/awslabs/amazon-bedrock-agentcore-samples)
 
 What operational challenges will you solve with AI-powered SRE assistance? Start your journey today and experience the future of intelligent infrastructure operations.
 
@@ -753,5 +699,3 @@ What operational challenges will you solve with AI-powered SRE assistance? Start
 **[Author Name]** is a [Title] at Amazon Web Services, where [brief description of role and expertise]. [Additional background and interests].
 
 **[Author Name]** is a [Title] at Amazon Web Services, specializing in [expertise areas]. [Background and contributions].
-
-**[Author Name]** is a [Title] at Amazon Web Services, focusing on [specialization]. [Experience and interests]. 
