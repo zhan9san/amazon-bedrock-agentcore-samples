@@ -10,7 +10,21 @@ An AWS support conversational AI system built on Amazon Bedrock AgentCore, featu
 
 ## Architecture Overview
 
+### High-Level Architecture
+
+![AWS Support Agent High-Level Architecture](images/architecture-2.jpg)
+
+*High-level system architecture showing the complete AgentCore ecosystem with observability integration*
+
+### Detailed Authentication Flow
+
+![AWS Support Agent Authentication Flow](images/flow.jpg)
+
+*Detailed sequence diagram showing OAuth2 authentication flow and token management across AgentCore components*
+
 ![AWS Support Agent Architecture](images/architecture.jpg)
+
+*Core system architecture showing component interactions and data flow*
 
 The system follows a secure, distributed architecture:
 
@@ -19,6 +33,7 @@ The system follows a secure, distributed architecture:
 3. **AgentCore Gateway** provides secure tool access through MCP protocol
 4. **AWS Lambda Target** executes AWS service operations with proper authentication
 5. **AgentCore Identity** manages workload authentication and token exchange
+6. **AgentCore Observability** provides comprehensive monitoring, metrics, and logging capabilities
 
 ## Key Features
 
@@ -71,7 +86,11 @@ AgentCore/
 │   │   ├── 08-delete-runtimes.sh       # Runtime cleanup
 │   │   ├── 09-delete-gateways-targets.sh # Gateway cleanup
 │   │   ├── 10-delete-mcp-tool-deployment.sh # MCP cleanup
-│   │   ├── 11-delete-memory.sh         # Memory cleanup
+│   │   ├── 11-delete-oauth-provider.sh # OAuth provider cleanup
+│   │   ├── 12-delete-memory.sh         # Memory cleanup
+│   │   ├── 13-cleanup-everything.sh    # Complete cleanup script
+│   │   ├── bac-permissions-policy.json # IAM permissions policy
+│   │   ├── bac-trust-policy.json       # IAM trust policy
 │   │   ├── Dockerfile.diy              # DIY agent container
 │   │   ├── Dockerfile.sdk              # SDK agent container
 │   │   ├── deploy-diy-runtime.py       # DIY deployment automation
@@ -112,7 +131,7 @@ AgentCore/
 Edit the configuration files with your specific settings:
 
 ```bash
-# Configure AWS and Okta settings
+# Configure AWS and Okta settings - Ensure you update the static config 
 vim config/static-config.yaml
 
 # Key settings to update:
@@ -138,16 +157,30 @@ grep -n "$(aws sts get-caller-identity --query Account --output text)" \
 
 Run the deployment scripts in sequence:
 
+#### Note: `Before running below scripts please ensure you have successfully setup Okta and can generate access token using http://localhost:8080/okta-auth/iframe-oauth-flow.html - Refer OKTA-OPENID-PKCE-SETUP.md for details.`
+
 ```bash
 cd agentcore-runtime/deployment
 
+# Please ensure you update below files with account ID by replacing the place holders <your-aws-account-id> before running ./01-prerequisites.sh
+# bac-permissions-policy.json
+# bac-trust-policy.json
 # Set up AWS prerequisites and roles
 ./01-prerequisites.sh
+
+# If you get error 'aws bedrock-agentcore-control is not available'
+# please update your aws cli to latest version using
+# curl "https://awscli.amazonaws.com/AWSCLIV2.pkg" -o "AWSCLIV2.pkg"
+# sudo installer -pkg AWSCLIV2.pkg -target /
 
 # Create AgentCore Memory for conversation storage
 ./02-create-memory.sh
 
-# Set up Okta OAuth2 provider
+# Set up Okta OAuth2 provider - This setup is for outbound auth from AgentCore Runtime to AgentCore Gateway EndPoint.
+# Please ensure you OKTA-OPENID-PKCE-SETUP.md file to setup SPA app for client side - inbound auth with runtime
+# And also setup new services app for outbound auth between AgentCore Runtime and AgentCore Gateway EndPoint.
+# You need to add the client id/client secret of the <**Create a new app integration**: API Services> app when executing below script as,
+# that will create a credentails provider where these secrets will be stored.
 ./03-setup-oauth-provider.sh
 
 # Deploy MCP tools Lambda function
@@ -161,69 +194,80 @@ cd agentcore-runtime/deployment
 ./07-deploy-sdk.sh    # BedrockAgentCoreApp implementation
 ```
 
+#### Note: `Scripts above dynamically update the dynamic-config.yaml file. Please ensure the yaml file is correctly updated.`
+
 ### 3. Test the System
 
-#### Run Local Test Scripts
-```bash
-# Test local agent functionality
-cd agentcore-runtime/tests/local
-./test-diy-simple.sh    # Tests DIY agent with local tools
-./test-sdk-mcp.sh       # Tests SDK agent with MCP gateway integration
-```
-
-#### Test with Direct curl Commands
-
-**DIY Agent (Port 8080):**
-```bash
-# Start DIY agent
-cd agentcore-runtime/tests/local && ./test-diy-simple.sh
-
-# Test with curl (returns SSE stream)
-curl -X POST http://localhost:8080/invocations \
-  -H "Content-Type: application/json" \
-  -d '{
-    "prompt": "What time is it?",
-    "session_id": "test-session-123",
-    "actor_id": "user"
-  }'
-
-# Extract just the text response
-curl -s -X POST http://localhost:8080/invocations \
-  -H "Content-Type: application/json" \
-  -d '{"prompt": "Hello!", "session_id": "demo", "actor_id": "user"}' \
-  | grep '"type":"text_delta"' \
-  | sed 's/.*"content": *"\([^"]*\)".*/\1/' \
-  | tr -d '\n'
-
-# Health check
-curl http://localhost:8080/ping
-# Returns: {"status":"healthy","agent_type":"diy"}
-```
-
-**SDK Agent (Port 8081):**
-```bash
-# Start SDK agent
-cd agentcore-runtime/tests/local && ./test-sdk-mcp.sh
-
-# Test with curl (returns different SSE format)
-curl -X POST http://localhost:8081/invocations \
-  -H "Content-Type: application/json" \
-  -d '{
-    "prompt": "What time is it?",
-    "session_id": "test-session-456",
-    "actor_id": "user"
-  }'
-
-# Health check
-curl http://localhost:8081/ping
-# Returns: {"status":"Healthy","time_of_last_update":1753954747}
-```
-
 #### Use the Interactive Chat Client
+
+**For deployed agents:**
 ```bash
-cd chatbot-client/src
-python client.py
+cd chatbot-client
+python src/client.py
 ```
+
+The client will show you available deployed agents:
+```
+🤖 AgentCore Chatbot Client
+==============================
+
+📦 Available AgentCore Runtimes:
+========================================
+1. DIY Agent
+   Name: bac_runtime_diy
+   ARN: arn:aws:bedrock-agentcore:us-east-1:xxxxxxx:runtime/bac_runtime_diy-xxxxx
+   Status: ✅ Available
+2. SDK Agent
+   Name: bac_runtime_sdk
+   ARN: arn:aws:bedrock-agentcore:us-east-1:xxxxx:runtime/bac_runtime_sdk-xxxx
+   Status: ✅ Available
+
+🎯 Select Runtime:
+Enter choice (1 for DIY, 2 for SDK): 
+```
+
+#### Interactive Chat Client with Local Containers (optional - advance use case)
+
+```bash
+# Start a local agent container
+cd agentcore-runtime/tests/local
+./run-diy-local-container.sh    # For DIY agent
+# OR
+./run-sdk-local-container.sh    # For SDK agent
+
+# In another terminal, connect with the chat client
+cd chatbot-client
+python src/client.py --local
+```
+
+The client will show you available local agents:
+```
+🤖 Local Testing Mode
+==============================
+
+📦 Local Testing Mode:
+========================================
+1. DIY Agent
+   Name: Local DIY Agent
+   URL: http://localhost:8080
+   Status: ✅ Available (if Docker container is running)
+2. SDK Agent
+   Name: Local SDK Agent
+   URL: http://localhost:8080
+   Status: ✅ Available (if Docker container is running)
+
+🎯 Select Runtime:
+Enter choice (1 for DIY, 2 for SDK):
+```
+
+**For local testing with containers:**
+```bash
+cd chatbot-client
+python src/client.py --local
+```
+
+The `--local` flag enables local testing mode where you can connect to containerized agents running on localhost:8080.
+
 
 ## Component Details
 
@@ -291,23 +335,6 @@ The `shared/config_manager.py` provides:
 - Validation and error handling
 - Backward compatibility
 
-## Development
-
-### Local Testing
-
-```bash
-# Test agents locally without full deployment
-cd agentcore-runtime/tests/local
-
-# Test DIY agent with simple conversation
-./test-diy-simple.sh
-
-# Test SDK agent with MCP tools
-./test-sdk-mcp.sh
-
-# Test MCP gateway functionality
-./test-diy-ec2-mcp.sh
-```
 
 ### Container Development
 
@@ -323,6 +350,19 @@ Both agents follow a standardized container structure:
 ├── [agent].py                 # Agent implementation
 └── requirements.txt
 ```
+
+### Local Container Scripts
+
+The following scripts provide easy local testing with full containerization:
+
+- **`agentcore-runtime/tests/local/run-diy-local-container.sh`** - Runs DIY agent in Docker container on port 8080
+- **`agentcore-runtime/tests/local/run-sdk-local-container.sh`** - Runs SDK agent in Docker container on port 8080
+
+These containers include:
+- Full MCP tool integration
+- Local tool fallbacks when MCP gateway is unavailable
+- Complete agent functionality without AWS deployment
+- Isolated testing environment
 
 ### Adding New Tools
 
@@ -371,6 +411,8 @@ python update-gateway.py --gateway-id <id> --name "New Name"
 
 To remove all deployed resources:
 
+### Note: `Runtime deletion takes time.`
+
 ```bash
 cd agentcore-runtime/deployment
 
@@ -383,11 +425,14 @@ cd agentcore-runtime/deployment
 # Delete MCP Lambda
 ./10-delete-mcp-tool-deployment.sh
 
-# Delete memory and clear config
-./11-delete-memory.sh
+# Delete Identity - Credentials Provider
+./11-delete-oauth-provider.sh
+
+# Delete memory
+./12-delete-memory.sh
 
 # Complete cleanup (optional)
-./12-cleanup-everything.sh
+./13-cleanup-everything.sh
 ```
 
 ## Security Best Practices

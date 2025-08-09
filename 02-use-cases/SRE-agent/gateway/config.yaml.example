@@ -9,6 +9,8 @@ region: "us-east-1"
 role_name: "YOUR_ROLE_NAME"
 endpoint_url: "https://bedrock-agentcore-control.us-east-1.amazonaws.com"
 credential_provider_endpoint_url: "https://us-east-1.prod.agent-credential-provider.cognito.aws.dev"
+# Name for the API key credential provider used by backend services for authentication
+credential_provider_name: "sre-agent-api-key-credential-provider"
 
 
 # Cognito Configuration

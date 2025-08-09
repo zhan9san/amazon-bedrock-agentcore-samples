@@ -15,6 +15,12 @@ This guide configures Okta OAuth2 authentication for the AgentCore system, suppo
 
 ## Okta Application Setup
 
+#### OKTA Documentation for PKCE APP Setup: 
+
+https://developer.okta.com/blog/2019/08/22/okta-authjs-pkce 
+
+https://developer.okta.com/docs/guides/implement-grant-type/authcodepkce/main/
+
 ### 1. Create OIDC Application
 
 1. **Log in to Okta Developer Console**
@@ -27,10 +33,15 @@ This guide configures Okta OAuth2 authentication for the AgentCore system, suppo
    Sign-in redirect URIs: 
      - http://localhost:8080/callback
      - http://localhost:8080/okta-auth/
+     - http://localhost:8080/okta-auth/iframe-oauth-flow.html
    Sign-out redirect URIs: http://localhost:8080/
    Controlled access: Allow everyone in your organization to access
+   uncheck “Immediate app access with Federation Broker Mode“
    ```
 5. **Save** the application and note the **Client ID**
+```
+Confirm you are added under Assignment
+```
 
 ### 2. Configure API Scopes
 
@@ -44,16 +55,27 @@ This guide configures Okta OAuth2 authentication for the AgentCore system, suppo
    - **Description**: API access for AgentCore
    - **Include in public metadata**: ✅
 
+```
+Under Security → API → Trusted Origins, enable CORS for http://localhost:8080
+Origin: http://localhost:8080
+ ✅ Cross-Origin Resource Sharing (CORS)
+ ✅ Redirect
+ ✅ iFrame embed
+ ✅ Allows iFrame embedding of Okta End User Dashboard
+```
+
 ### 3. Create Machine-to-Machine Application
 
 For AgentCore workload authentication:
 
-1. **Create new app**: OIDC - OpenID Connect → Web Application
+1. **Create a new app integration**: API Services
 2. **Configure**:
    ```
    App name: aws-support-agent-m2m
    Grant types: ✅ Client Credentials
    Client authentication: ✅ Client secret
+   Enable : Token Exchange
+   Disable : Require Demonstrating Proof of Possession (DPoP)
    ```
 3. **Save** and note the **Client ID** and **Client Secret**
 
@@ -103,9 +125,6 @@ agentcore:
 ### 2. Set Environment Variables
 
 ```bash
-# Set the Okta client secret
-export OKTA_CLIENT_SECRET="your_m2m_client_secret"
-
 # Optional: Set AWS profile if different from default
 export AWS_PROFILE="your-aws-profile"
 ```
@@ -178,14 +197,15 @@ Use the provided HTML test page:
      scope: 'openid profile email',
    };
    ```
+Or you can enter the values in html page. 
 
-2. **Open browser**: http://localhost:8080/okta-auth/
+2. **Open browser**: http://localhost:9090/okta-auth/iframe-oauth-flow.html
 3. **Click "Login with Okta"** and complete authentication
 4. **Copy the access token** for testing
 
 ## Deploy and Test the System
 
-### 1. Deploy Infrastructure
+### 1. Deploy Infrastructure - go back to README.md for instructions
 
 ```bash
 # Deploy the AgentCore system
