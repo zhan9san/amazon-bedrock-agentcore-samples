@@ -7,7 +7,7 @@ load_dotenv()
 
 # Get environment variables without fallback values
 AWS_REGION = os.getenv('AWS_REGION')
-ENDPOINT_URL = os.getenv('ENDPOINT_URL')
+#ENDPOINT_URL = os.getenv('ENDPOINT_URL')
 GATEWAY_IDENTIFIER = os.getenv('GATEWAY_IDENTIFIER')
 LAMBDA_ARN = os.getenv('LAMBDA_ARN')
 TARGET_NAME = os.getenv('TARGET_NAME')
@@ -15,8 +15,8 @@ TARGET_DESCRIPTION = os.getenv('TARGET_DESCRIPTION')
 
 bedrock_agent_core_client = boto3.client(
     'bedrock-agentcore-control', 
-    region_name=AWS_REGION, 
-    endpoint_url=ENDPOINT_URL
+    region_name=AWS_REGION
+    #endpoint_url=ENDPOINT_URL
 )
 
 lambda_target_config = {
